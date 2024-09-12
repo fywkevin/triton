@@ -256,4 +256,22 @@ def TTG_LocalStoreOp : TTG_Op<"local_store", [DeclareOpInterfaceMethods<MemoryEf
   }];
 }
 
+def TTG_LocalRecordOp : TTG_Op<"local_record", [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
+  let summary = "Record an event metric from a hardware performance counter";
+
+  let description = [{
+    Record an event metric (e.g., cycle) from a hardware performance counter in an SM,
+    and save it in the shared memory. The bookkeeping is automatically maintained.
+  }];
+  let arguments = (
+    ins TT_MemDescType:$smem,
+    TT_MemDescType :$index,
+    BoolAttr: $isStart,
+    I32Attr: $regionId,
+    DefaultValuedAttr<TT_ProtonMetricAttr, "triton::ProtonMetric::CYCLE">:$metric
+  );
+
+  // TODO (fywkevin): add verify and asm format
+}
+
 #endif

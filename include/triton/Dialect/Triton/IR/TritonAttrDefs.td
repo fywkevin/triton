@@ -118,4 +118,14 @@ def TT_InputPrecisionAttr : I32EnumAttr<
   let cppNamespace = "::mlir::triton";
 }
 
+// Proton Profiling Metric.
+def TT_ProtonMetricAttr : I32EnumAttr<
+    "ProtonMetric", "",
+    [
+        I32EnumAttrCase<"CYCLE", 0, "cycle">,
+        I32EnumAttrCase<"INVALID", 1, "invalid">,
+    ]> {
+    let cppNamespace = "::mlir::triton";
+}
+
 #endif
