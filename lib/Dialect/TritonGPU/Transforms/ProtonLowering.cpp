@@ -32,7 +32,6 @@ public:
   LogicalResult matchAndRewrite(ProtonRecordOp op,
                                 PatternRewriter &rewriter) const override {
     MLIRContext *ctx = op.getContext();
-    Operation *m = op->getParentOp();
     rewriter.replaceOpWithNewOp<LocalRecordOp>(
         op, buffer, index, op.getIsStart(), op.getRegionId(), op.getMetric());
     return success();
@@ -51,6 +50,7 @@ public:
   void runOnOperation() override {
     ModuleOp m = getOperation();
     MLIRContext *context = m.getContext();
+    // TODO (fywkevin) : clean-up the loc.
     FuncOp func;
     for (auto op : m.getOps<triton::FuncOp>()) {
       if (!func)
@@ -62,23 +62,32 @@ public:
     // Allocate shared memory resource.
     OpBuilder builder(context);
     builder.setInsertionPointToStart(&func.getBody().front());
-    auto dstType = RankedTensorType::get({1024}, builder.getI32Type());
+    auto bufType = RankedTensorType::get({1024}, builder.getI32Type());
     Attribute sharedMemorySpace =
         triton::gpu::SharedMemorySpaceAttr::get(context);
 
-    auto CTALayout =
+    auto ctaLayout =
         triton::gpu::CTALayoutAttr::get(context, /*CTAsPerCGA=*/{1},
                                         /*CTASplitNum=*/{1}, /*CTAOrder=*/{0});
     auto encoding =
-        triton::gpu::SharedEncodingAttr::get(context, 1, 1, 1, {0}, CTALayout);
+        triton::gpu::SharedEncodingAttr::get(context, 1, 1, 1, {0}, ctaLayout);
 
     auto smemType =
-        MemDescType::get(dstType.getShape(), dstType.getElementType(), encoding,
-                         sharedMemorySpace, true);
+        MemDescType::get(bufType.getShape(), bufType.getElementType(), encoding,
+                         sharedMemorySpace, /*mutable_memory=*/true);
     Value buffer =
         builder.create<triton::gpu::LocalAllocOp>(m.getLoc(), smemType);
-    Value index =
-        builder.create<triton::gpu::LocalAllocOp>(m.getLoc(), smemType);
+
+    auto indexTensorType = RankedTensorType::get({1}, builder.getI32Type());
+    auto idxSmemType = MemDescType::get(
+        indexTensorType.getShape(), indexTensorType.getElementType(), encoding,
+        sharedMemorySpace, /*mutable_memory=*/true);
+    auto scalar = builder.create<arith::ConstantOp>(
+        m.getLoc(), builder.getI32Type(), builder.getI32IntegerAttr(0));
+    auto splat =
+        builder.create<triton::SplatOp>(m.getLoc(), indexTensorType, scalar);
+    Value index = builder.create<triton::gpu::LocalAllocOp>(m.getLoc(),
+                                                            idxSmemType, splat);
 
     // Rewrite the record op with resource binded.
     mlir::RewritePatternSet patterns(context);
