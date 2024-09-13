@@ -270,8 +270,21 @@ def TTG_LocalRecordOp : TTG_Op<"local_record", [DeclareOpInterfaceMethods<Memory
     I32Attr: $regionId,
     DefaultValuedAttr<TT_ProtonMetricAttr, "triton::ProtonMetric::CYCLE">:$metric
   );
-
   // TODO (fywkevin): add verify and asm format
 }
 
+def TTG_ProtonFinalizeOp : TTG_Op<"proton_finalize", [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
+  let summary = "Finalize the proton profiler";
+
+  let description = [{
+    Finalize the proton profiler, including dumping the metadata and measurements to the global memory for
+    each SM.
+  }];
+  let arguments = (
+    ins TT_MemDescType:$smem,
+    TT_MemDescType :$index,
+    TT_PtrLike :$ptr
+  );
+  // TODO (fywkevin): add verify and asm format
+}
 #endif

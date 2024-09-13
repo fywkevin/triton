@@ -2977,6 +2977,18 @@ void LocalRecordOp::getEffects(
                        SideEffects::DefaultResource::get());
 }
 
+// ProtonFinalizeOp
+void ProtonFinalizeOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(MemoryEffects::Read::get(), &getSmemMutable(),
+                       mlir::triton::gpu::SharedMemory::get());
+  effects.emplace_back(MemoryEffects::Read::get(), &getIndexMutable(),
+                       mlir::triton::gpu::SharedMemory::get());
+  effects.emplace_back(MemoryEffects::Write::get(), &getPtrMutable(),
+                       mlir::triton::GlobalMemory::get());
+}
+
 // AsyncCopyGlobalToLocalOp
 LogicalResult AsyncCopyGlobalToLocalOp::verify() {
   if (!getResult().getType().getMutableMemory())

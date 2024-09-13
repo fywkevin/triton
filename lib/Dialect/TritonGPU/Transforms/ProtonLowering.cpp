@@ -51,9 +51,7 @@ public:
     ModuleOp m = getOperation();
     MLIRContext *context = m.getContext();
 
-    // Find the function, we only support Triton kernels with inlined = True for
-    // now.
-    // TODO (fywkevin) : check the `inlined` attribute.
+    // TODO (fywkevin) : better way to report failure.
     FuncOp func;
     for (auto op : m.getOps<triton::FuncOp>()) {
       if (!func)
@@ -61,6 +59,13 @@ public:
       else
         llvm::report_fatal_error("only expect one function in the module");
     }
+
+    bool noinline = cast<BoolAttr>(func->getAttr("noinline")).getValue();
+    assert(!noinline &&
+           "only support inlined triton kernels for now (noinline = false)");
+
+    bool profiling = func->hasAttr("profiling");
+    assert(profiling && "intra-kernel profiling not enabled");
 
     Location loc = func.getLoc();
 
@@ -106,11 +111,13 @@ public:
       signalPassFailure();
 
     //===--------------------------------------------------------------------===//
-    // Insert the LocalFinalizeOp and write back to the global memory.
+    // Insert the ProtonFinalizeOp in the end.
     //===--------------------------------------------------------------------===//
 
     Operation *ret = &func.getBody().front().back();
     builder.setInsertionPoint(ret);
+    Value profileMem = func.getArguments().back();
+    builder.create<ProtonFinalizeOp>(loc, buffer, index, profileMem);
     return;
   }
 };
