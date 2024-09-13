@@ -50,7 +50,10 @@ public:
   void runOnOperation() override {
     ModuleOp m = getOperation();
     MLIRContext *context = m.getContext();
-    // TODO (fywkevin) : clean-up the loc.
+
+    // Find the function, we only support Triton kernels with inlined = True for
+    // now.
+    // TODO (fywkevin) : check the `inlined` attribute.
     FuncOp func;
     for (auto op : m.getOps<triton::FuncOp>()) {
       if (!func)
@@ -59,43 +62,55 @@ public:
         llvm::report_fatal_error("only expect one function in the module");
     }
 
-    // Allocate shared memory resource.
+    Location loc = func.getLoc();
+
+    //===--------------------------------------------------------------------===//
+    // Allocate shared memory resources.
+    //===--------------------------------------------------------------------===//
+
     OpBuilder builder(context);
     builder.setInsertionPointToStart(&func.getBody().front());
-    auto bufType = RankedTensorType::get({1024}, builder.getI32Type());
+
+    // Alloc the shared memory for buffer (uninitialized).
     Attribute sharedMemorySpace =
         triton::gpu::SharedMemorySpaceAttr::get(context);
-
     auto ctaLayout =
         triton::gpu::CTALayoutAttr::get(context, /*CTAsPerCGA=*/{1},
                                         /*CTASplitNum=*/{1}, /*CTAOrder=*/{0});
     auto encoding =
         triton::gpu::SharedEncodingAttr::get(context, 1, 1, 1, {0}, ctaLayout);
-
-    auto smemType =
-        MemDescType::get(bufType.getShape(), bufType.getElementType(), encoding,
+    // TODO (fywkevin) : size from the module's attribute.
+    auto bufferType =
+        MemDescType::get({1024}, builder.getI32Type(), encoding,
                          sharedMemorySpace, /*mutable_memory=*/true);
-    Value buffer =
-        builder.create<triton::gpu::LocalAllocOp>(m.getLoc(), smemType);
+    Value buffer = builder.create<triton::gpu::LocalAllocOp>(loc, bufferType);
 
+    // Alloc the shared memory for index (initialized to 0).
     auto indexTensorType = RankedTensorType::get({1}, builder.getI32Type());
-    auto idxSmemType = MemDescType::get(
+    auto indexType = MemDescType::get(
         indexTensorType.getShape(), indexTensorType.getElementType(), encoding,
         sharedMemorySpace, /*mutable_memory=*/true);
     auto scalar = builder.create<arith::ConstantOp>(
-        m.getLoc(), builder.getI32Type(), builder.getI32IntegerAttr(0));
-    auto splat =
-        builder.create<triton::SplatOp>(m.getLoc(), indexTensorType, scalar);
-    Value index = builder.create<triton::gpu::LocalAllocOp>(m.getLoc(),
-                                                            idxSmemType, splat);
+        loc, builder.getI32Type(), builder.getI32IntegerAttr(0));
+    auto splat = builder.create<triton::SplatOp>(loc, indexTensorType, scalar);
+    Value index =
+        builder.create<triton::gpu::LocalAllocOp>(loc, indexType, splat);
 
-    // Rewrite the record op with resource binded.
+    //===--------------------------------------------------------------------===//
+    // Lower the ProtonRecordOp with shared memory resources binded.
+    //===--------------------------------------------------------------------===//
+
     mlir::RewritePatternSet patterns(context);
     patterns.add<ProtonRecordOpLowering>(context, buffer, index);
     if (applyPatternsAndFoldGreedily(m, std::move(patterns)).failed())
       signalPassFailure();
 
-    // Write back to the global memory.
+    //===--------------------------------------------------------------------===//
+    // Insert the LocalFinalizeOp and write back to the global memory.
+    //===--------------------------------------------------------------------===//
+
+    Operation *ret = &func.getBody().front().back();
+    builder.setInsertionPoint(ret);
     return;
   }
 };
