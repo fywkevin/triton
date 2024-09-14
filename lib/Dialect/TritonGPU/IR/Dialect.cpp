@@ -2989,6 +2989,14 @@ void ProtonFinalizeOp::getEffects(
                        mlir::triton::GlobalMemory::get());
 }
 
+// ProtonInitOp
+void ProtonInitOp::getEffects(
+    SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
+        &effects) {
+  effects.emplace_back(MemoryEffects::Write::get(), &getIndexMutable(),
+                       mlir::triton::gpu::SharedMemory::get());
+}
+
 // AsyncCopyGlobalToLocalOp
 LogicalResult AsyncCopyGlobalToLocalOp::verify() {
   if (!getResult().getType().getMutableMemory())

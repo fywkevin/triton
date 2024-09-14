@@ -90,29 +90,24 @@ public:
                          sharedMemorySpace, /*mutable_memory=*/true);
     Value buffer = builder.create<triton::gpu::LocalAllocOp>(loc, bufferType);
 
-    // Alloc the shared memory for index (initialized to 0).
-    auto indexTensorType = RankedTensorType::get({1}, builder.getI32Type());
-    auto indexType = MemDescType::get(
-        indexTensorType.getShape(), indexTensorType.getElementType(), encoding,
-        sharedMemorySpace, /*mutable_memory=*/true);
-    auto scalar = builder.create<arith::ConstantOp>(
-        loc, builder.getI32Type(), builder.getI32IntegerAttr(0));
-    auto splat = builder.create<triton::SplatOp>(loc, indexTensorType, scalar);
-    Value index =
-        builder.create<triton::gpu::LocalAllocOp>(loc, indexType, splat);
+    // Alloc the shared memory for index (uninitialized).
+    int numWarpGroups = TritonGPUDialect::getNumWarps(m) / 4;
+    auto indexType =
+        MemDescType::get({numWarpGroups}, builder.getI32Type(), encoding,
+                         sharedMemorySpace, /*mutable_memory=*/true);
+    Value index = builder.create<triton::gpu::LocalAllocOp>(loc, indexType);
 
     //===--------------------------------------------------------------------===//
-    // Lower the ProtonRecordOp with shared memory resources binded.
+    // Insert/lower Proton-related operators.
     //===--------------------------------------------------------------------===//
+
+    builder.setInsertionPointAfter(index.getDefiningOp());
+    builder.create<ProtonInitOp>(loc, index);
 
     mlir::RewritePatternSet patterns(context);
     patterns.add<ProtonRecordOpLowering>(context, buffer, index);
     if (applyPatternsAndFoldGreedily(m, std::move(patterns)).failed())
       signalPassFailure();
-
-    //===--------------------------------------------------------------------===//
-    // Insert the ProtonFinalizeOp in the end.
-    //===--------------------------------------------------------------------===//
 
     Operation *ret = &func.getBody().front().back();
     builder.setInsertionPoint(ret);

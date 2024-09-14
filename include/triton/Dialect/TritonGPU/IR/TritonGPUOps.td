@@ -287,4 +287,16 @@ def TTG_ProtonFinalizeOp : TTG_Op<"proton_finalize", [DeclareOpInterfaceMethods<
   );
   // TODO (fywkevin): add verify and asm format
 }
+
+def TTG_ProtonInitOp : TTG_Op<"proton_init", [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
+    let summary = "Initialize proton profiler resources.";
+
+    let description = [{
+        Initializes shared memory allocations for proton profiler.
+        `index` stores the number of entires proton measured, initialized as 0.
+    }];
+
+    let arguments = (ins TT_MemDescType:$index);
+    // TODO (fywkevin): add verify and asm format
+}
 #endif

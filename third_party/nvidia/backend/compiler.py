@@ -227,6 +227,8 @@ class CUDABackend(BaseBackend):
         passes.ttgpuir.add_remove_layout_conversions(pm)
         passes.ttgpuir.add_reduce_data_duplication(pm)
         passes.ttgpuir.add_reorder_instructions(pm)
+        # TODO(fywkevin): add an option to check for proton
+        passes.ttgpuir.add_proton_lowering(pm)
         passes.common.add_cse(pm)
         passes.common.add_symbol_dce(pm)
         if capability // 10 >= 9:
@@ -266,6 +268,11 @@ class CUDABackend(BaseBackend):
         if os.environ.get("TRITON_DISABLE_LINE_INFO", "0") == "0":
             passes.llvmir.add_di_scope(pm)
         pm.run(mod)
+        # fywkevin: hack here to experiment
+        with open("/home/fywkevin/local/exp/profiler/tmp-llvm-ir.mlir", 'w') as f:
+            f.write(mod.__str__())
+        print("---- successfully wrote to tmp-llvm-ir.mlir ----")
+        # fywkevin: hack end
         # LLVM-IR (MLIR) -> LLVM-IR (LLVM)
         llvm.init_targets()
         context = llvm.context()

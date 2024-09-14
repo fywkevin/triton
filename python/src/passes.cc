@@ -68,6 +68,7 @@ void init_triton_passes_ttgpuir(py::module &&m) {
                      createTritonGPUCombineTensorSelectAndIf);
   ADD_PASS_WRAPPER_0("add_optimize_accumulator_init",
                      createTritonGPUOptimizeAccumulatorInit);
+  ADD_PASS_WRAPPER_0("add_proton_lowering", createTritonGPUProtonLowering);
 }
 
 void init_triton_passes_convert(py::module &&m) {
