@@ -246,6 +246,11 @@ class CUDABackend(BaseBackend):
         if num_warp_groups is not None:
             metadata["num_warps"] *= num_warp_groups
         mod = src
+        # fywkevin: hack here to experiment
+        #with open("/home/fywkevin/local/exp/profiler/tmp.ttgir", 'w') as f:
+        #    f.write(mod.__str__())
+        #print("---- successfully wrote to tmp.ttgir ----")
+        # fywkevin: hack end
         # TritonGPU -> LLVM-IR (MLIR)
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()

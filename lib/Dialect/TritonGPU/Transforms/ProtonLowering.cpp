@@ -64,8 +64,8 @@ public:
     assert(!noinline &&
            "only support inlined triton kernels for now (noinline = false)");
 
-    bool profiling = func->hasAttr("profiling");
-    assert(profiling && "intra-kernel profiling not enabled");
+    assert(m->hasAttr("proton.slots") && "intra-kernel profiling not enabled");
+    auto slots = cast<IntegerAttr>(m->getAttr("proton.slots")).getInt();
 
     Location loc = func.getLoc();
 
@@ -84,21 +84,20 @@ public:
                                         /*CTASplitNum=*/{1}, /*CTAOrder=*/{0});
     auto encoding =
         triton::gpu::SharedEncodingAttr::get(context, 1, 1, 1, {0}, ctaLayout);
-    // TODO (fywkevin) : size from the module's attribute.
     auto bufferType =
-        MemDescType::get({1024}, builder.getI32Type(), encoding,
+        MemDescType::get({slots}, builder.getI32Type(), encoding,
                          sharedMemorySpace, /*mutable_memory=*/true);
     Value buffer = builder.create<triton::gpu::LocalAllocOp>(loc, bufferType);
 
     // Alloc the shared memory for index (uninitialized).
-    int numWarpGroups = TritonGPUDialect::getNumWarps(m) / 4;
+    int numWarpgroups = TritonGPUDialect::getNumWarps(m) / 4;
     auto indexType =
-        MemDescType::get({numWarpGroups}, builder.getI32Type(), encoding,
+        MemDescType::get({numWarpgroups}, builder.getI32Type(), encoding,
                          sharedMemorySpace, /*mutable_memory=*/true);
     Value index = builder.create<triton::gpu::LocalAllocOp>(loc, indexType);
 
     //===--------------------------------------------------------------------===//
-    // Insert/lower Proton-related operators.
+    // Insert and lower Proton operators.
     //===--------------------------------------------------------------------===//
 
     builder.setInsertionPointAfter(index.getDefiningOp());

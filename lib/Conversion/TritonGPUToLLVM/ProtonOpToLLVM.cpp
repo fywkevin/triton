@@ -43,6 +43,62 @@ struct ProtonFinalizeOpConversion
   LogicalResult
   matchAndRewrite(triton::gpu::ProtonFinalizeOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
+
+    Value indexStruct = adaptor.getIndex();
+    auto loc = op.getLoc();
+    auto mod = op.getOperation()->getParentOfType<ModuleOp>();
+    const int numWarpgroup =
+        triton::gpu::TritonGPUDialect::getNumWarps(mod) / 4;
+
+    // TODO (fywkevin) : check to make sure 1D launch.
+    // Get the thread id. We only support 1D launch.
+    Value threadId = getThreadId(rewriter, loc);
+    Value isFirstThread = icmp_eq(threadId, i32_val(0));
+
+    // Only warpgroup leader should do these finalize work.
+    Block *prevBlock = op->getBlock();
+    Block *ifBlock = rewriter.splitBlock(prevBlock, op->getIterator());
+    rewriter.setInsertionPointToStart(ifBlock);
+
+    auto gmemPtrTy = ptr_ty(rewriter.getContext(), 1);
+    Value gmemBasePtr = adaptor.getPtr();
+    auto ptrTy = ptr_ty(rewriter.getContext(), 3);
+    Value basePtr = extract_val(ptrTy, indexStruct, 0);
+
+    int offset = 0;
+    auto slots = cast<IntegerAttr>(mod->getAttr("proton.slots")).getInt();
+    // scratch: block id (1), index (numWarpgroup), data (proton.slots * 2)
+    const int scratchWordSize = 1 + numWarpgroup + slots * 2;
+    // Write back program id. We only support 1D launch.
+    Value pid =
+        targetInfo.programId(rewriter, loc, op->getParentOfType<ModuleOp>(), 0);
+    Value programOffset = mul(i32_val(scratchWordSize), pid);
+    Value gmemOffset = add(programOffset, i32_val(offset++));
+    Value gmemPtr = gep(gmemPtrTy, i32_ty, gmemBasePtr, gmemOffset);
+    store(pid, gmemPtr);
+
+    // Write back the total counts of entries for each warpgroup.
+    for (int i = 0; i < numWarpgroup; i++) {
+      Value gmemOffset = add(programOffset, i32_val(offset++));
+      Value warpgroupId = i32_val(i);
+      // Load the index value
+      Value ptr = gep(ptrTy, i32_ty, basePtr, warpgroupId);
+      Value smemLoad =
+          targetInfo.loadShared(rewriter, loc, ptr, i32_ty, true_val());
+      // Store the index to global memory
+      Value gmemPtr = gep(gmemPtrTy, i32_ty, gmemBasePtr, gmemOffset);
+      store(smemLoad, gmemPtr);
+    }
+
+    // Write back the data.
+
+    // Split a block after the call.
+    Block *thenBlock = rewriter.splitBlock(ifBlock, op->getIterator());
+    rewriter.setInsertionPointToEnd(ifBlock);
+    rewriter.create<cf::BranchOp>(loc, thenBlock);
+    rewriter.setInsertionPointToEnd(prevBlock);
+    rewriter.create<cf::CondBranchOp>(loc, isFirstThread, ifBlock, thenBlock);
+
     rewriter.eraseOp(op);
     return success();
   }
@@ -65,9 +121,18 @@ struct ProtonInitOpConversion
                   ConversionPatternRewriter &rewriter) const override {
     Value indexStruct = adaptor.getIndex();
     auto loc = op.getLoc();
+    auto mod = op.getOperation()->getParentOfType<ModuleOp>();
+
+    Value threadId = getThreadId(rewriter, loc);
+    Value warpgroupSize =
+        i32_val(4 * triton::gpu::TritonGPUDialect::getThreadsPerWarp(mod));
+    Value warpgroupId = udiv(threadId, warpgroupSize);
+    Value isWarpgroup = icmp_eq(urem(threadId, warpgroupSize), i32_val(0));
+
     auto ptrTy = ptr_ty(rewriter.getContext(), 3);
-    Value ptr = extract_val(ptrTy, indexStruct, 0);
-    targetInfo.storeShared(rewriter, loc, ptr, i32_val(0), true_val());
+    Value basePtr = extract_val(ptrTy, indexStruct, 0);
+    Value ptr = gep(ptrTy, i32_ty, basePtr, warpgroupId);
+    targetInfo.storeShared(rewriter, loc, ptr, i32_val(0), isWarpgroup);
     rewriter.eraseOp(op);
     return success();
   }
