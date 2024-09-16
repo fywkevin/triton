@@ -66,6 +66,7 @@ public:
 
     assert(m->hasAttr("proton.slots") && "intra-kernel profiling not enabled");
     auto slots = cast<IntegerAttr>(m->getAttr("proton.slots")).getInt();
+    assert(slots > 0 && "proton.slots must be greater than 0");
 
     Location loc = func.getLoc();
 

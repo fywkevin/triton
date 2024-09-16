@@ -45,6 +45,8 @@ struct ProtonFinalizeOpConversion
                   ConversionPatternRewriter &rewriter) const override {
 
     Value indexStruct = adaptor.getIndex();
+    Value dataStruct = adaptor.getData();
+
     auto loc = op.getLoc();
     auto mod = op.getOperation()->getParentOfType<ModuleOp>();
     const int numWarpgroup =
@@ -57,18 +59,31 @@ struct ProtonFinalizeOpConversion
 
     // Only warpgroup leader should do these finalize work.
     Block *prevBlock = op->getBlock();
+    // Add the 'if' block.
     Block *ifBlock = rewriter.splitBlock(prevBlock, op->getIterator());
     rewriter.setInsertionPointToStart(ifBlock);
 
     auto gmemPtrTy = ptr_ty(rewriter.getContext(), 1);
     Value gmemBasePtr = adaptor.getPtr();
-    auto ptrTy = ptr_ty(rewriter.getContext(), 3);
-    Value basePtr = extract_val(ptrTy, indexStruct, 0);
+    auto smemPtrTy = ptr_ty(rewriter.getContext(), 3);
+
+    // Lambda function to load a word from smem and store it to gmem.
+    auto copyWord = [&](Value smemStruct, Value smemOffset, Value gmemOffset) {
+      Value smemBasePtr = extract_val(smemPtrTy, smemStruct, 0);
+      // Load the value from smem
+      Value ptr = gep(smemPtrTy, i32_ty, smemBasePtr, smemOffset);
+      Value smemLoad =
+          targetInfo.loadShared(rewriter, loc, ptr, i32_ty, true_val());
+      // Store the value to global memory
+      Value gmemPtr = gep(gmemPtrTy, i32_ty, gmemBasePtr, gmemOffset);
+      store(smemLoad, gmemPtr);
+    };
 
     int offset = 0;
-    auto slots = cast<IntegerAttr>(mod->getAttr("proton.slots")).getInt();
-    // scratch: block id (1), index (numWarpgroup), data (proton.slots * 2)
-    const int scratchWordSize = 1 + numWarpgroup + slots * 2;
+    const int slots = cast<IntegerAttr>(mod->getAttr("proton.slots")).getInt();
+    // scratch: block id (1), index (numWarpgroup), data (proton.slots *
+    // wordsPerEntry)
+    const int scratchWordSize = 1 + numWarpgroup + slots * wordsPerEntry;
     // Write back program id. We only support 1D launch.
     Value pid =
         targetInfo.programId(rewriter, loc, op->getParentOfType<ModuleOp>(), 0);
@@ -81,23 +96,41 @@ struct ProtonFinalizeOpConversion
     for (int i = 0; i < numWarpgroup; i++) {
       Value gmemOffset = add(programOffset, i32_val(offset++));
       Value warpgroupId = i32_val(i);
-      // Load the index value
-      Value ptr = gep(ptrTy, i32_ty, basePtr, warpgroupId);
-      Value smemLoad =
-          targetInfo.loadShared(rewriter, loc, ptr, i32_ty, true_val());
-      // Store the index to global memory
-      Value gmemPtr = gep(gmemPtrTy, i32_ty, gmemBasePtr, gmemOffset);
-      store(smemLoad, gmemPtr);
+      copyWord(indexStruct, warpgroupId, gmemOffset);
     }
 
-    // Write back the data.
-
-    // Split a block after the call.
+    // Add the 'else' block and the condition.
     Block *thenBlock = rewriter.splitBlock(ifBlock, op->getIterator());
-    rewriter.setInsertionPointToEnd(ifBlock);
-    rewriter.create<cf::BranchOp>(loc, thenBlock);
     rewriter.setInsertionPointToEnd(prevBlock);
     rewriter.create<cf::CondBranchOp>(loc, isFirstThread, ifBlock, thenBlock);
+
+    // Write back the data.
+    const int upper = wordsPerEntry * (slots - 1);
+    rewriter.setInsertionPointToEnd(ifBlock);
+    Value initIdx = rewriter.create<LLVM::ConstantOp>(loc, i32_ty, 0);
+    Value wbBaseOffset = add(programOffset, i32_val(offset));
+
+    // TODO (fywkevin): make `loc` precise.
+    Block *writeBackBlock = rewriter.createBlock(
+        op->getParentRegion(), std::next(Region::iterator(ifBlock)), {i32_ty},
+        {loc});
+    rewriter.setInsertionPointToStart(writeBackBlock);
+    BlockArgument idx = writeBackBlock->getArgument(0);
+    Value gmemWbTagOffset = add(wbBaseOffset, idx);
+    Value smemTagOffset = idx;
+    Value gmemWbCycleOffset = add(gmemWbTagOffset, i32_val(1));
+    Value smemCycleOffset = add(smemTagOffset, i32_val(1));
+    copyWord(dataStruct, smemTagOffset, gmemWbTagOffset);
+    copyWord(dataStruct, smemCycleOffset, gmemWbCycleOffset);
+    // rewriter.create<triton::PrintOp>(loc, StringRef(" Write back at "),
+    // false, ValueRange({gmemWbTagOffset}), ::llvm::ArrayRef<int32_t>({1}));
+    Value pred = icmp_slt(idx, i32_val(upper));
+    Value updatedIdx = add(idx, i32_val(wordsPerEntry));
+    rewriter.create<cf::CondBranchOp>(loc, pred, writeBackBlock, updatedIdx,
+                                      thenBlock, ArrayRef<Value>());
+
+    rewriter.setInsertionPointToEnd(ifBlock);
+    rewriter.create<cf::BranchOp>(loc, writeBackBlock, initIdx);
 
     rewriter.eraseOp(op);
     return success();
@@ -105,6 +138,7 @@ struct ProtonFinalizeOpConversion
 
 private:
   const TargetInfoBase &targetInfo;
+  const int wordsPerEntry = 2;
 };
 
 struct ProtonInitOpConversion

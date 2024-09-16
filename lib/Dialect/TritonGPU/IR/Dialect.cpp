@@ -2981,7 +2981,7 @@ void LocalRecordOp::getEffects(
 void ProtonFinalizeOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
         &effects) {
-  effects.emplace_back(MemoryEffects::Read::get(), &getSmemMutable(),
+  effects.emplace_back(MemoryEffects::Read::get(), &getDataMutable(),
                        mlir::triton::gpu::SharedMemory::get());
   effects.emplace_back(MemoryEffects::Read::get(), &getIndexMutable(),
                        mlir::triton::gpu::SharedMemory::get());

@@ -264,7 +264,7 @@ def TTG_LocalRecordOp : TTG_Op<"local_record", [DeclareOpInterfaceMethods<Memory
     and save it in the shared memory. The bookkeeping is automatically maintained.
   }];
   let arguments = (
-    ins TT_MemDescType:$smem,
+    ins TT_MemDescType:$data,
     TT_MemDescType :$index,
     BoolAttr: $isStart,
     I32Attr: $regionId,
@@ -281,7 +281,7 @@ def TTG_ProtonFinalizeOp : TTG_Op<"proton_finalize", [DeclareOpInterfaceMethods<
     each SM.
   }];
   let arguments = (
-    ins TT_MemDescType:$smem,
+    ins TT_MemDescType:$data,
     TT_MemDescType :$index,
     TT_PtrLike :$ptr
   );
