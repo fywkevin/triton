@@ -23,12 +23,81 @@ struct LocalRecordOpConversion
   LogicalResult
   matchAndRewrite(triton::gpu::LocalRecordOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
+    auto loc = op.getLoc();
+    auto mod = op.getOperation()->getParentOfType<ModuleOp>();
+    const int slots = cast<IntegerAttr>(mod->getAttr("proton.slots")).getInt();
+    const int numWarpgroup =
+        triton::gpu::TritonGPUDialect::getNumWarps(mod) / warpsPerGroup;
+
+    assert(op.getMetric() == triton::ProtonMetric::CYCLE);
+
+    auto bookkeepingLambda = [&](bool isStart,
+                                 llvm::SmallVector<Value, 2> &res) {
+      Value indexStruct = adaptor.getIndex();
+      Value dataStruct = adaptor.getData();
+
+      auto smemPtrTy = ptr_ty(rewriter.getContext(), 3);
+      Value smemIndexBasePtr = extract_val(smemPtrTy, indexStruct, 0);
+      Value smemDataBasePtr = extract_val(smemPtrTy, dataStruct, 0);
+
+      Value threadId = getThreadId(rewriter, loc);
+      Value warpgroupSize =
+          i32_val(warpsPerGroup *
+                  triton::gpu::TritonGPUDialect::getThreadsPerWarp(mod));
+      Value warpgroupId = udiv(threadId, warpgroupSize);
+      Value isWarpgroup = icmp_eq(urem(threadId, warpgroupSize), i32_val(0));
+
+      // Load the index from smem
+      Value ptr = gep(smemPtrTy, i32_ty, smemIndexBasePtr, warpgroupId);
+      Value curIdx =
+          targetInfo.loadShared(rewriter, loc, ptr, i32_ty, isWarpgroup);
+      Value newIdx = add(curIdx, i32_val(1));
+      targetInfo.storeShared(rewriter, loc, ptr, newIdx, isWarpgroup);
+
+      int numWgSlot = slots / numWarpgroup;
+      Value wgSlotOffset = mul(warpgroupId, i32_val(wordsPerEntry * numWgSlot));
+      Value smemTagOffset =
+          add(wgSlotOffset,
+              mul(urem(curIdx, i32_val(numWgSlot)), i32_val(wordsPerEntry)));
+      Value smemCycleOffset = add(smemTagOffset, i32_val(1));
+
+      // Record the entry
+      Value tagPtr = gep(smemPtrTy, i32_ty, smemDataBasePtr, smemTagOffset);
+      Value tag = isStart ? i32_val(op.getRegionId())
+                          : i32_val(1 << 31 | op.getRegionId());
+      targetInfo.storeShared(rewriter, loc, tagPtr, tag, isWarpgroup);
+
+      Value cyclePtr = gep(smemPtrTy, i32_ty, smemDataBasePtr, smemCycleOffset);
+
+      res.push_back(cyclePtr);
+      res.push_back(isWarpgroup);
+    };
+
+    llvm::SmallVector<Value, 2> res;
+    if (op.getIsStart()) {
+      // Bookkeeping before getting clock
+      bookkeepingLambda(true, res);
+      Value cyclePtr = res[0];
+      Value isWarpgroup = res[1];
+      Value clock = targetInfo.clock(rewriter, loc, false);
+      targetInfo.storeShared(rewriter, loc, cyclePtr, clock, isWarpgroup);
+    } else {
+      // Bookkeeping after getting clock
+      Value clock = targetInfo.clock(rewriter, loc, false);
+      bookkeepingLambda(false, res);
+      Value cyclePtr = res[0];
+      Value isWarpgroup = res[1];
+      targetInfo.storeShared(rewriter, loc, cyclePtr, clock, isWarpgroup);
+    }
+
     rewriter.eraseOp(op);
     return success();
   }
 
 private:
   const TargetInfoBase &targetInfo;
+  const int wordsPerEntry = 2;
+  const int warpsPerGroup = 4;
 };
 
 struct ProtonFinalizeOpConversion
@@ -50,7 +119,7 @@ struct ProtonFinalizeOpConversion
     auto loc = op.getLoc();
     auto mod = op.getOperation()->getParentOfType<ModuleOp>();
     const int numWarpgroup =
-        triton::gpu::TritonGPUDialect::getNumWarps(mod) / 4;
+        triton::gpu::TritonGPUDialect::getNumWarps(mod) / warpsPerGroup;
 
     // TODO (fywkevin) : check to make sure 1D launch.
     // Get the thread id. We only support 1D launch.
@@ -81,16 +150,22 @@ struct ProtonFinalizeOpConversion
 
     int offset = 0;
     const int slots = cast<IntegerAttr>(mod->getAttr("proton.slots")).getInt();
-    // scratch: block id (1), index (numWarpgroup), data (proton.slots *
-    // wordsPerEntry)
-    const int scratchWordSize = 1 + numWarpgroup + slots * wordsPerEntry;
-    // Write back program id. We only support 1D launch.
-    Value pid =
-        targetInfo.programId(rewriter, loc, op->getParentOfType<ModuleOp>(), 0);
+    // scratch: block id (1), sm id (1), index (numWarpgroup), data
+    // (proton.slots * wordsPerEntry)
+    const int scratchWordSize = 1 + 1 + numWarpgroup + slots * wordsPerEntry;
+    Value pid = targetInfo.programId(rewriter, loc, mod, 0);
+    Value smid = targetInfo.smId(rewriter, loc);
     Value programOffset = mul(i32_val(scratchWordSize), pid);
-    Value gmemOffset = add(programOffset, i32_val(offset++));
-    Value gmemPtr = gep(gmemPtrTy, i32_ty, gmemBasePtr, gmemOffset);
-    store(pid, gmemPtr);
+
+    // Write back program id. We only support 1D launch.
+    Value gmemPidOffset = add(programOffset, i32_val(offset++));
+    Value gmemPidPtr = gep(gmemPtrTy, i32_ty, gmemBasePtr, gmemPidOffset);
+    store(pid, gmemPidPtr);
+
+    // Write back SM id.
+    Value gmemSmOffset = add(programOffset, i32_val(offset++));
+    Value gmemSmPtr = gep(gmemPtrTy, i32_ty, gmemBasePtr, gmemSmOffset);
+    store(smid, gmemSmPtr);
 
     // Write back the total counts of entries for each warpgroup.
     for (int i = 0; i < numWarpgroup; i++) {
@@ -122,8 +197,6 @@ struct ProtonFinalizeOpConversion
     Value smemCycleOffset = add(smemTagOffset, i32_val(1));
     copyWord(dataStruct, smemTagOffset, gmemWbTagOffset);
     copyWord(dataStruct, smemCycleOffset, gmemWbCycleOffset);
-    // rewriter.create<triton::PrintOp>(loc, StringRef(" Write back at "),
-    // false, ValueRange({gmemWbTagOffset}), ::llvm::ArrayRef<int32_t>({1}));
     Value pred = icmp_slt(idx, i32_val(upper));
     Value updatedIdx = add(idx, i32_val(wordsPerEntry));
     rewriter.create<cf::CondBranchOp>(loc, pred, writeBackBlock, updatedIdx,
@@ -139,6 +212,7 @@ struct ProtonFinalizeOpConversion
 private:
   const TargetInfoBase &targetInfo;
   const int wordsPerEntry = 2;
+  const int warpsPerGroup = 4;
 };
 
 struct ProtonInitOpConversion
@@ -158,8 +232,8 @@ struct ProtonInitOpConversion
     auto mod = op.getOperation()->getParentOfType<ModuleOp>();
 
     Value threadId = getThreadId(rewriter, loc);
-    Value warpgroupSize =
-        i32_val(4 * triton::gpu::TritonGPUDialect::getThreadsPerWarp(mod));
+    Value warpgroupSize = i32_val(
+        warpsPerGroup * triton::gpu::TritonGPUDialect::getThreadsPerWarp(mod));
     Value warpgroupId = udiv(threadId, warpgroupSize);
     Value isWarpgroup = icmp_eq(urem(threadId, warpgroupSize), i32_val(0));
 
@@ -173,6 +247,7 @@ struct ProtonInitOpConversion
 
 private:
   const TargetInfoBase &targetInfo;
+  const int warpsPerGroup = 4;
 };
 
 } // namespace

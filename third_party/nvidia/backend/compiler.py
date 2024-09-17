@@ -228,7 +228,7 @@ class CUDABackend(BaseBackend):
         passes.ttgpuir.add_reduce_data_duplication(pm)
         passes.ttgpuir.add_reorder_instructions(pm)
         # TODO(fywkevin): add an option to check for proton
-        #passes.ttgpuir.add_proton_lowering(pm)
+        passes.ttgpuir.add_proton_lowering(pm)
         passes.common.add_cse(pm)
         passes.common.add_symbol_dce(pm)
         if capability // 10 >= 9:
@@ -247,9 +247,9 @@ class CUDABackend(BaseBackend):
             metadata["num_warps"] *= num_warp_groups
         mod = src
         # fywkevin: hack here to experiment
-        #with open("/home/fywkevin/local/exp/profiler/tmp.ttgir", 'w') as f:
-        #    f.write(mod.__str__())
-        #print("---- successfully wrote to tmp.ttgir ----")
+        with open("/home/fywkevin/local/exp/profiler/tmp.ttgir", 'w') as f:
+            f.write(mod.__str__())
+        print("---- successfully wrote to tmp.ttgir ----")
         # fywkevin: hack end
         # TritonGPU -> LLVM-IR (MLIR)
         pm = ir.pass_manager(mod.context)

@@ -66,7 +66,6 @@ public:
 
     assert(m->hasAttr("proton.slots") && "intra-kernel profiling not enabled");
     auto slots = cast<IntegerAttr>(m->getAttr("proton.slots")).getInt();
-    assert(slots > 0 && "proton.slots must be greater than 0");
 
     Location loc = func.getLoc();
 
@@ -91,7 +90,11 @@ public:
     Value buffer = builder.create<triton::gpu::LocalAllocOp>(loc, bufferType);
 
     // Alloc the shared memory for index (uninitialized).
+    // TODO (fywkevin) : replace 4 with warpsPerGroup.
     int numWarpgroups = TritonGPUDialect::getNumWarps(m) / 4;
+    assert(slots >= numWarpgroups &&
+           "proton.slots must be greater than numWarpgroups");
+
     auto indexType =
         MemDescType::get({numWarpgroups}, builder.getI32Type(), encoding,
                          sharedMemorySpace, /*mutable_memory=*/true);
