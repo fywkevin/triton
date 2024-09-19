@@ -227,8 +227,6 @@ class CUDABackend(BaseBackend):
         passes.ttgpuir.add_remove_layout_conversions(pm)
         passes.ttgpuir.add_reduce_data_duplication(pm)
         passes.ttgpuir.add_reorder_instructions(pm)
-        # TODO(fywkevin): add an option to check for proton
-        passes.ttgpuir.add_proton_lowering(pm)
         passes.common.add_cse(pm)
         passes.common.add_symbol_dce(pm)
         if capability // 10 >= 9:
@@ -261,6 +259,8 @@ class CUDABackend(BaseBackend):
             mod.context.printOpOnDiagnostic(True)
         nvidia.passes.ttgpuir.add_decompose_unsupported_conversions(pm)
         passes.ttgpuir.add_combine_tensor_select_and_if(pm)
+        # TODO(fywkevin): add an option to check for proton
+        passes.ttgpuir.add_proton_lowering(pm)
         passes.convert.add_scf_to_cf(pm)
         passes.convert.add_index_to_llvmir(pm)
         passes.ttgpuir.add_allocate_shared_memory(pm)

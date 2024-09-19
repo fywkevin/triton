@@ -121,8 +121,7 @@ struct ProtonFinalizeOpConversion
     const int numWarpgroup =
         triton::gpu::TritonGPUDialect::getNumWarps(mod) / warpsPerGroup;
 
-    // TODO (fywkevin) : check to make sure 1D launch.
-    // Get the thread id. We only support 1D launch.
+    // TODO (fywkevin) : Does Triton always have the block size (xxx, 1, 1)?
     Value threadId = getThreadId(rewriter, loc);
     Value isFirstThread = icmp_eq(threadId, i32_val(0));
 
@@ -153,8 +152,18 @@ struct ProtonFinalizeOpConversion
     // scratch: block id (1), sm id (1), index (numWarpgroup), data
     // (proton.slots * wordsPerEntry)
     const int scratchWordSize = 1 + 1 + numWarpgroup + slots * wordsPerEntry;
-    Value pid = targetInfo.programId(rewriter, loc, mod, 0);
+    Value pidX = targetInfo.programId(rewriter, loc, mod, 0);
+    Value pidY = targetInfo.programId(rewriter, loc, mod, 1);
+    Value pidZ = targetInfo.programId(rewriter, loc, mod, 2);
     Value smid = targetInfo.smId(rewriter, loc);
+    Value gridDimX = rewriter.create<arith::IndexCastOp>(
+        loc, i32_ty,
+        rewriter.create<::mlir::gpu::GridDimOp>(loc, mlir::gpu::Dimension::x));
+    Value gridDimY = rewriter.create<arith::IndexCastOp>(
+        loc, i32_ty,
+        rewriter.create<::mlir::gpu::GridDimOp>(loc, mlir::gpu::Dimension::y));
+    Value pid =
+        add(add(pidX, mul(pidY, gridDimX)), mul(pidZ, mul(gridDimX, gridDimY)));
     Value programOffset = mul(i32_val(scratchWordSize), pid);
 
     // Write back program id. We only support 1D launch.

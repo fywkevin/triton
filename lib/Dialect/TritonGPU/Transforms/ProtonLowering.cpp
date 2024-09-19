@@ -75,6 +75,8 @@ public:
 
     OpBuilder builder(context);
     builder.setInsertionPointToStart(&func.getBody().front());
+    const int wordsPerEntry = 2;
+    const int warpsPerGroup = 4;
 
     // Alloc the shared memory for buffer (uninitialized).
     Attribute sharedMemorySpace =
@@ -85,13 +87,12 @@ public:
     auto encoding =
         triton::gpu::SharedEncodingAttr::get(context, 1, 1, 1, {0}, ctaLayout);
     auto bufferType =
-        MemDescType::get({slots}, builder.getI32Type(), encoding,
-                         sharedMemorySpace, /*mutable_memory=*/true);
+        MemDescType::get({wordsPerEntry * slots}, builder.getI32Type(),
+                         encoding, sharedMemorySpace, /*mutable_memory=*/true);
     Value buffer = builder.create<triton::gpu::LocalAllocOp>(loc, bufferType);
 
     // Alloc the shared memory for index (uninitialized).
-    // TODO (fywkevin) : replace 4 with warpsPerGroup.
-    int numWarpgroups = TritonGPUDialect::getNumWarps(m) / 4;
+    int numWarpgroups = TritonGPUDialect::getNumWarps(m) / warpsPerGroup;
     assert(slots >= numWarpgroups &&
            "proton.slots must be greater than numWarpgroups");
 
