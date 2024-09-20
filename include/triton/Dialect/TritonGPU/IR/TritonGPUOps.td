@@ -265,7 +265,7 @@ def TTG_LocalRecordOp : TTG_Op<"local_record", [DeclareOpInterfaceMethods<Memory
   }];
   let arguments = (
     ins TT_MemDescType:$data,
-    TT_MemDescType :$index,
+    TT_PtrLike :$indexPtr,
     BoolAttr: $isStart,
     I32Attr: $regionId,
     DefaultValuedAttr<TT_ProtonMetricAttr, "triton::ProtonMetric::CYCLE">:$metric
@@ -282,7 +282,7 @@ def TTG_ProtonFinalizeOp : TTG_Op<"proton_finalize", [DeclareOpInterfaceMethods<
   }];
   let arguments = (
     ins TT_MemDescType:$data,
-    TT_MemDescType :$index,
+    TT_PtrLike :$indexPtr,
     TT_PtrLike :$ptr
   );
   // TODO (fywkevin): add verify and asm format
@@ -292,11 +292,12 @@ def TTG_ProtonInitOp : TTG_Op<"proton_init", [DeclareOpInterfaceMethods<MemoryEf
     let summary = "Initialize proton profiler resources.";
 
     let description = [{
-        Initializes shared memory allocations for proton profiler.
-        `index` stores the number of entires proton measured, initialized as 0.
+        Stack allocation and initialization for proton profiler.
+        `indexPtr` stores the number of entires proton measured, initialized as 0.
     }];
 
-    let arguments = (ins TT_MemDescType:$index);
     // TODO (fywkevin): add verify and asm format
+    let arguments = (ins);
+    let results = (outs TT_PtrLike :$indexPtr);
 }
 #endif

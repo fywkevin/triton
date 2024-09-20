@@ -26,8 +26,8 @@ namespace gpu {
 
 class ProtonRecordOpLowering : public OpRewritePattern<ProtonRecordOp> {
 public:
-  ProtonRecordOpLowering(MLIRContext *ctx, Value buf, Value idx)
-      : OpRewritePattern::OpRewritePattern(ctx), buffer(buf), index(idx) {}
+  ProtonRecordOpLowering(MLIRContext *ctx, Value buf, Value ptr)
+      : OpRewritePattern::OpRewritePattern(ctx), buffer(buf), index(ptr) {}
 
   LogicalResult matchAndRewrite(ProtonRecordOp op,
                                 PatternRewriter &rewriter) const override {
@@ -96,17 +96,14 @@ public:
     assert(slots >= numWarpgroups &&
            "proton.slots must be greater than numWarpgroups");
 
-    auto indexType =
-        MemDescType::get({numWarpgroups}, builder.getI32Type(), encoding,
-                         sharedMemorySpace, /*mutable_memory=*/true);
-    Value index = builder.create<triton::gpu::LocalAllocOp>(loc, indexType);
-
     //===--------------------------------------------------------------------===//
     // Insert and lower Proton operators.
     //===--------------------------------------------------------------------===//
 
-    builder.setInsertionPointAfter(index.getDefiningOp());
-    builder.create<ProtonInitOp>(loc, index);
+    builder.setInsertionPointToStart(&func.getBody().front());
+    auto ptrTy =
+        triton::PointerType::get(mlir::IntegerType::get(context, 32), 1);
+    Value index = builder.create<ProtonInitOp>(loc, ptrTy);
 
     mlir::RewritePatternSet patterns(context);
     patterns.add<ProtonRecordOpLowering>(context, buffer, index);

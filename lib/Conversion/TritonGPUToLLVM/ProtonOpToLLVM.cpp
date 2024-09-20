@@ -31,64 +31,39 @@ struct LocalRecordOpConversion
 
     assert(op.getMetric() == triton::ProtonMetric::CYCLE);
 
-    auto bookkeepingLambda = [&](bool isStart,
-                                 llvm::SmallVector<Value, 2> &res) {
-      Value indexStruct = adaptor.getIndex();
-      Value dataStruct = adaptor.getData();
+    Value indexPtr = adaptor.getIndexPtr();
+    Value dataStruct = adaptor.getData();
 
-      auto smemPtrTy = ptr_ty(rewriter.getContext(), 3);
-      Value smemIndexBasePtr = extract_val(smemPtrTy, indexStruct, 0);
-      Value smemDataBasePtr = extract_val(smemPtrTy, dataStruct, 0);
+    auto smemPtrTy = ptr_ty(rewriter.getContext(), 3);
+    Value smemDataBasePtr = extract_val(smemPtrTy, dataStruct, 0);
 
-      Value threadId = getThreadId(rewriter, loc);
-      Value warpgroupSize =
-          i32_val(warpsPerGroup *
-                  triton::gpu::TritonGPUDialect::getThreadsPerWarp(mod));
-      Value warpgroupId = udiv(threadId, warpgroupSize);
-      Value isWarpgroup = icmp_eq(urem(threadId, warpgroupSize), i32_val(0));
+    Value threadId = getThreadId(rewriter, loc);
+    Value warpgroupSize = i32_val(
+        warpsPerGroup * triton::gpu::TritonGPUDialect::getThreadsPerWarp(mod));
+    Value warpgroupId = udiv(threadId, warpgroupSize);
+    Value isWarpgroup = icmp_eq(urem(threadId, warpgroupSize), i32_val(0));
 
-      // Load the index from smem
-      Value ptr = gep(smemPtrTy, i32_ty, smemIndexBasePtr, warpgroupId);
-      Value curIdx =
-          targetInfo.loadShared(rewriter, loc, ptr, i32_ty, isWarpgroup);
-      Value newIdx = add(curIdx, i32_val(1));
-      targetInfo.storeShared(rewriter, loc, ptr, newIdx, isWarpgroup);
+    // Load the index from smem
+    Value curIdx = load(i32_ty, indexPtr);
+    Value newIdx = add(curIdx, i32_val(1));
+    store(newIdx, indexPtr);
 
-      int numWgSlot = slots / numWarpgroup;
-      Value wgSlotOffset = mul(warpgroupId, i32_val(wordsPerEntry * numWgSlot));
-      Value smemTagOffset =
-          add(wgSlotOffset,
-              mul(urem(curIdx, i32_val(numWgSlot)), i32_val(wordsPerEntry)));
-      Value smemCycleOffset = add(smemTagOffset, i32_val(1));
+    int numWgSlot = slots / numWarpgroup;
+    Value wgSlotOffset = mul(warpgroupId, i32_val(wordsPerEntry * numWgSlot));
+    Value smemTagOffset =
+        add(wgSlotOffset,
+            mul(urem(curIdx, i32_val(numWgSlot)), i32_val(wordsPerEntry)));
+    Value smemCycleOffset = add(smemTagOffset, i32_val(1));
 
-      // Record the entry
-      Value tagPtr = gep(smemPtrTy, i32_ty, smemDataBasePtr, smemTagOffset);
-      Value tag = isStart ? i32_val(op.getRegionId())
-                          : i32_val(1 << 31 | op.getRegionId());
-      targetInfo.storeShared(rewriter, loc, tagPtr, tag, isWarpgroup);
+    // Record the entry
+    Value vecPtr = gep(smemPtrTy, i32_ty, smemDataBasePtr, smemTagOffset);
+    Value tag = op.getIsStart() ? i32_val(op.getRegionId())
+                                : i32_val(1 << 31 | op.getRegionId());
+    Value clock = targetInfo.clock(rewriter, loc, false);
 
-      Value cyclePtr = gep(smemPtrTy, i32_ty, smemDataBasePtr, smemCycleOffset);
-
-      res.push_back(cyclePtr);
-      res.push_back(isWarpgroup);
-    };
-
-    llvm::SmallVector<Value, 2> res;
-    if (op.getIsStart()) {
-      // Bookkeeping before getting clock
-      bookkeepingLambda(true, res);
-      Value cyclePtr = res[0];
-      Value isWarpgroup = res[1];
-      Value clock = targetInfo.clock(rewriter, loc, false);
-      targetInfo.storeShared(rewriter, loc, cyclePtr, clock, isWarpgroup);
-    } else {
-      // Bookkeeping after getting clock
-      Value clock = targetInfo.clock(rewriter, loc, false);
-      bookkeepingLambda(false, res);
-      Value cyclePtr = res[0];
-      Value isWarpgroup = res[1];
-      targetInfo.storeShared(rewriter, loc, cyclePtr, clock, isWarpgroup);
-    }
+    Value valsVec = packLLVector(loc, {tag, clock}, rewriter);
+    targetInfo.storeDShared(rewriter, loc, vecPtr, std::nullopt, valsVec,
+                            /*pred=*/isWarpgroup);
 
     rewriter.eraseOp(op);
     return success();
@@ -113,7 +88,7 @@ struct ProtonFinalizeOpConversion
   matchAndRewrite(triton::gpu::ProtonFinalizeOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
 
-    Value indexStruct = adaptor.getIndex();
+    Value indexPtr = adaptor.getIndexPtr();
     Value dataStruct = adaptor.getData();
 
     auto loc = op.getLoc();
@@ -124,6 +99,10 @@ struct ProtonFinalizeOpConversion
     // TODO (fywkevin) : Does Triton always have the block size (xxx, 1, 1)?
     Value threadId = getThreadId(rewriter, loc);
     Value isFirstThread = icmp_eq(threadId, i32_val(0));
+    Value warpgroupSize = i32_val(
+        warpsPerGroup * triton::gpu::TritonGPUDialect::getThreadsPerWarp(mod));
+    Value warpgroupId = udiv(threadId, warpgroupSize);
+    Value isWarpgroup = icmp_eq(urem(threadId, warpgroupSize), i32_val(0));
 
     // Only warpgroup leader should do these finalize work.
     Block *prevBlock = op->getBlock();
@@ -166,7 +145,7 @@ struct ProtonFinalizeOpConversion
         add(add(pidX, mul(pidY, gridDimX)), mul(pidZ, mul(gridDimX, gridDimY)));
     Value programOffset = mul(i32_val(scratchWordSize), pid);
 
-    // Write back program id. We only support 1D launch.
+    // Write back program id.
     Value gmemPidOffset = add(programOffset, i32_val(offset++));
     Value gmemPidPtr = gep(gmemPtrTy, i32_ty, gmemBasePtr, gmemPidOffset);
     store(pid, gmemPidPtr);
@@ -176,12 +155,11 @@ struct ProtonFinalizeOpConversion
     Value gmemSmPtr = gep(gmemPtrTy, i32_ty, gmemBasePtr, gmemSmOffset);
     store(smid, gmemSmPtr);
 
-    // Write back the total counts of entries for each warpgroup.
-    for (int i = 0; i < numWarpgroup; i++) {
-      Value gmemOffset = add(programOffset, i32_val(offset++));
-      Value warpgroupId = i32_val(i);
-      copyWord(indexStruct, warpgroupId, gmemOffset);
-    }
+    // Write back the total counts.
+    Value index = load(i32_ty, indexPtr);
+    Value gmemIndexOffset = add(programOffset, i32_val(offset++));
+    Value gmemIndexPtr = gep(gmemPtrTy, i32_ty, gmemBasePtr, gmemIndexOffset);
+    store(index, gmemIndexPtr);
 
     // Add the 'else' block and the condition.
     Block *thenBlock = rewriter.splitBlock(ifBlock, op->getIterator());
@@ -236,7 +214,6 @@ struct ProtonInitOpConversion
   LogicalResult
   matchAndRewrite(triton::gpu::ProtonInitOp op, OpAdaptor adaptor,
                   ConversionPatternRewriter &rewriter) const override {
-    Value indexStruct = adaptor.getIndex();
     auto loc = op.getLoc();
     auto mod = op.getOperation()->getParentOfType<ModuleOp>();
 
@@ -246,11 +223,11 @@ struct ProtonInitOpConversion
     Value warpgroupId = udiv(threadId, warpgroupSize);
     Value isWarpgroup = icmp_eq(urem(threadId, warpgroupSize), i32_val(0));
 
-    auto ptrTy = ptr_ty(rewriter.getContext(), 3);
-    Value basePtr = extract_val(ptrTy, indexStruct, 0);
-    Value ptr = gep(ptrTy, i32_ty, basePtr, warpgroupId);
-    targetInfo.storeShared(rewriter, loc, ptr, i32_val(0), isWarpgroup);
-    rewriter.eraseOp(op);
+    auto ptrTy = ptr_ty(rewriter.getContext(), 1);
+    auto indexPtr = rewriter.create<LLVM::AllocaOp>(
+        loc, ptrTy, i32_ty, i32_val(1), /*alignment=*/0);
+    store(i32_val(0), indexPtr);
+    rewriter.replaceOp(op, indexPtr);
     return success();
   }
 

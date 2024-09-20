@@ -2983,8 +2983,8 @@ void ProtonFinalizeOp::getEffects(
         &effects) {
   effects.emplace_back(MemoryEffects::Read::get(), &getDataMutable(),
                        mlir::triton::gpu::SharedMemory::get());
-  effects.emplace_back(MemoryEffects::Read::get(), &getIndexMutable(),
-                       mlir::triton::gpu::SharedMemory::get());
+  effects.emplace_back(MemoryEffects::Read::get(), &getIndexPtrMutable(),
+                       mlir::triton::GlobalMemory::get());
   effects.emplace_back(MemoryEffects::Write::get(), &getPtrMutable(),
                        mlir::triton::GlobalMemory::get());
 }
@@ -2993,8 +2993,8 @@ void ProtonFinalizeOp::getEffects(
 void ProtonInitOp::getEffects(
     SmallVectorImpl<SideEffects::EffectInstance<MemoryEffects::Effect>>
         &effects) {
-  effects.emplace_back(MemoryEffects::Write::get(), &getIndexMutable(),
-                       mlir::triton::gpu::SharedMemory::get());
+  effects.emplace_back(MemoryEffects::Allocate::get(),
+                       mlir::triton::GlobalMemory::get());
 }
 
 // AsyncCopyGlobalToLocalOp
