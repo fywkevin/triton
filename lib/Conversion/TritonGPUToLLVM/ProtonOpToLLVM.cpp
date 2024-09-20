@@ -45,15 +45,13 @@ struct LocalRecordOpConversion
 
     // Load the index from smem
     Value curIdx = load(i32_ty, indexPtr);
-    Value newIdx = add(curIdx, i32_val(1));
+    Value newIdx = add(curIdx, i32_val(wordsPerEntry));
     store(newIdx, indexPtr);
 
     int numWgSlot = slots / numWarpgroup;
     Value wgSlotOffset = mul(warpgroupId, i32_val(wordsPerEntry * numWgSlot));
     Value smemTagOffset =
-        add(wgSlotOffset,
-            mul(urem(curIdx, i32_val(numWgSlot)), i32_val(wordsPerEntry)));
-    Value smemCycleOffset = add(smemTagOffset, i32_val(1));
+        add(wgSlotOffset, urem(curIdx, i32_val(wordsPerEntry * numWgSlot)));
 
     // Record the entry
     Value vecPtr = gep(smemPtrTy, i32_ty, smemDataBasePtr, smemTagOffset);

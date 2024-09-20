@@ -34,7 +34,8 @@ class Event(object):
 
 
 def get_events(index, wg_id, data):
-    size = index if len(data) > index else len(data)
+    actual_slot_num = int(index / 2)
+    size = actual_slot_num if len(data) > actual_slot_num else len(data)
     event_list = []
     active_event = {}
     for i in range(0, size, 2):
@@ -328,7 +329,7 @@ class _attention(torch.autograd.Function):
             **extra_kern_args)
         '''
         # with profile mem as extra arg and proton.slots
-        pconfig = ProfileConfig(slots=360, header=3, wg_num=1, word_per_slot=2)
+        pconfig = ProfileConfig(slots=64, header=3, wg_num=1, word_per_slot=2)
         scratch = get_scratch_size(pconfig)
         profile_mem = torch.empty((np.prod(grid) * scratch), device="cuda", dtype=torch.uint32)
         print(q.shape[2])
