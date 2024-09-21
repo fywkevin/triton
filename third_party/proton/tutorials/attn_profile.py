@@ -12,8 +12,9 @@ from dataclasses import dataclass
 import numpy as np
 import copy
 
-file_name = "attn.ttgir"
-
+file_name = "attn_wg1_s1.ttgir"
+SLOT = 256
+WG = 1
 exp_attn_kernel = triton.compile(file_name)
 
 
@@ -326,10 +327,11 @@ class _attention(torch.autograd.Function):
             BLOCK_M = 128, #
             BLOCK_N = 128, #
             STAGE=stage,  #
+            num_warps=8,  #
             **extra_kern_args)
         '''
         # with profile mem as extra arg and proton.slots
-        pconfig = ProfileConfig(slots=64, header=3, wg_num=1, word_per_slot=2)
+        pconfig = ProfileConfig(slots=SLOT, header=3, wg_num=WG, word_per_slot=2)
         scratch = get_scratch_size(pconfig)
         profile_mem = torch.empty((np.prod(grid) * scratch), device="cuda", dtype=torch.uint32)
         print(q.shape[2])

@@ -78,6 +78,8 @@ public:
     const int wordsPerEntry = 2;
     const int warpsPerGroup = 4;
 
+    // TODO (fywkevin) : Add a check for <start,end> pair.
+
     // Alloc the shared memory for buffer (uninitialized).
     Attribute sharedMemorySpace =
         triton::gpu::SharedMemorySpaceAttr::get(context);

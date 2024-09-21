@@ -126,9 +126,9 @@ struct ProtonFinalizeOpConversion
 
     int offset = 0;
     const int slots = cast<IntegerAttr>(mod->getAttr("proton.slots")).getInt();
-    // scratch: block id (1), sm id (1), index (numWarpgroup), data
+    // scratch: block id (1), sm id (1), index (1), data
     // (proton.slots * wordsPerEntry)
-    const int scratchWordSize = 1 + 1 + numWarpgroup + slots * wordsPerEntry;
+    const int scratchWordSize = 3 + slots * wordsPerEntry;
     Value pidX = targetInfo.programId(rewriter, loc, mod, 0);
     Value pidY = targetInfo.programId(rewriter, loc, mod, 1);
     Value pidZ = targetInfo.programId(rewriter, loc, mod, 2);
