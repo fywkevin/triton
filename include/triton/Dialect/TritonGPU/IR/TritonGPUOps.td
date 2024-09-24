@@ -257,10 +257,10 @@ def TTG_LocalStoreOp : TTG_Op<"local_store", [DeclareOpInterfaceMethods<MemoryEf
 }
 
 def TTG_LocalRecordOp : TTG_Op<"local_record", [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
-  let summary = "Record an event metric from a hardware performance counter";
+  let summary = "Record an event from a special register or a hardware performance counter";
 
   let description = [{
-    Record an event metric (e.g., cycle) from a hardware performance counter in an SM,
+    Record an event (e.g., cycle) from a special register or a hardware performance counter,
     and save it in the shared memory. The bookkeeping is automatically maintained.
   }];
   let arguments = (
@@ -268,9 +268,9 @@ def TTG_LocalRecordOp : TTG_Op<"local_record", [DeclareOpInterfaceMethods<Memory
     TT_PtrLike :$indexPtr,
     BoolAttr: $isStart,
     I32Attr: $regionId,
-    DefaultValuedAttr<TT_ProtonMetricAttr, "triton::ProtonMetric::CYCLE">:$metric
+    DefaultValuedAttr<TT_ProtonMetricAttr, "triton::ProtonMetric::CYCLE">:$metric,
+    DefaultValuedAttr<TT_ProtonGranularityAttr, "triton::ProtonGranularity::WARPGROUP">:$granularity
   );
-  // TODO (fywkevin): add verify and asm format
 }
 
 def TTG_ProtonFinalizeOp : TTG_Op<"proton_finalize", [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
@@ -285,7 +285,6 @@ def TTG_ProtonFinalizeOp : TTG_Op<"proton_finalize", [DeclareOpInterfaceMethods<
     TT_PtrLike :$indexPtr,
     TT_PtrLike :$ptr
   );
-  // TODO (fywkevin): add verify and asm format
 }
 
 def TTG_ProtonInitOp : TTG_Op<"proton_init", [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
@@ -295,8 +294,6 @@ def TTG_ProtonInitOp : TTG_Op<"proton_init", [DeclareOpInterfaceMethods<MemoryEf
         Stack allocation and initialization for proton profiler.
         `indexPtr` stores the number of entires proton measured, initialized as 0.
     }];
-
-    // TODO (fywkevin): add verify and asm format
     let arguments = (ins);
     let results = (outs TT_PtrLike :$indexPtr);
 }

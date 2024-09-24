@@ -1044,5 +1044,110 @@ void ProtonRecordOp::getEffects(
                        SideEffects::DefaultResource::get());
 }
 
+LogicalResult ProtonRecordOp::verify() {
+  // We only support the warpgroup granularity for now.
+  if (getGranularity() == ProtonGranularity::WARP)
+    return failure();
+
+  // TODO (fywkevin) : Add the following checks
+  //  - a check for <start,end> pair
+  //  - a check for the last function argument is tt.ptr<i32>
+  //  - a check for the proton.slots attribute in module op
+  return success();
+}
+
+ParseResult ProtonRecordOp::parse(OpAsmParser &parser, OperationState &result) {
+  MLIRContext *ctx = parser.getContext();
+  int idx = 0;
+  std::string tag, metric, granularity;
+  mlir::IntegerAttr rid;
+
+  auto parseAttr = [&]() {
+    switch (idx++) {
+    case 0:
+      return parser.parseAttribute(rid, mlir::IntegerType::get(ctx, 32));
+    case 1:
+      return parser.parseString(&tag);
+    case 2:
+      return parser.parseOptionalString(&metric);
+    case 3:
+      return parser.parseOptionalString(&granularity);
+    }
+    return ParseResult(failure());
+  };
+
+  if (parser.parseLess() || parser.parseCommaSeparatedList(parseAttr) ||
+      parser.parseGreater())
+    return failure();
+
+  bool isStart;
+  if (tag == "start")
+    isStart = true;
+  else if (tag == "end")
+    isStart = false;
+  else
+    return failure();
+  result.addAttribute("isStart", BoolAttr::get(ctx, isStart));
+
+  result.addAttribute("regionId", rid);
+
+  ProtonMetricAttr metricAttr;
+  if (!metric.empty()) {
+    if (metric == "cycle")
+      metricAttr = ProtonMetricAttr::get(ctx, ProtonMetric::CYCLE);
+    else if (metric == "invalid")
+      metricAttr = ProtonMetricAttr::get(ctx, ProtonMetric::INVALID);
+    else
+      return failure();
+    result.addAttribute("metric", metricAttr);
+  }
+
+  ProtonGranularityAttr granularityAttr;
+  if (!granularity.empty()) {
+    if (granularity == "warpgroup")
+      granularityAttr =
+          ProtonGranularityAttr::get(ctx, ProtonGranularity::WARPGROUP);
+    else if (granularity == "warp")
+      granularityAttr =
+          ProtonGranularityAttr::get(ctx, ProtonGranularity::WARP);
+    else if (granularity == "invalid")
+      granularityAttr =
+          ProtonGranularityAttr::get(ctx, ProtonGranularity::INVALID);
+    else
+      return failure();
+    result.addAttribute("granularity", granularityAttr);
+  }
+
+  return success();
+}
+
+void ProtonRecordOp::print(OpAsmPrinter &printer) {
+  Operation *op = getOperation();
+  printer << " <";
+  printer << getRegionId() << ", ";
+
+  if (getIsStart()) {
+    printer << "\"start\", ";
+  } else {
+    printer << "\"end\", ";
+  }
+
+  if (getMetric() == ProtonMetric::CYCLE) {
+    printer << "\"cycle\", ";
+  } else {
+    printer << "\"invalid\", ";
+  }
+
+  if (getGranularity() == ProtonGranularity::WARP) {
+    printer << "\"warp\"";
+  } else if (getGranularity() == ProtonGranularity::WARPGROUP) {
+    printer << "\"warpgroup\"";
+  } else {
+    printer << "\"invalid\"";
+  }
+
+  printer << ">";
+}
+
 } // namespace triton
 } // namespace mlir

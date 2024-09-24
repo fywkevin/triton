@@ -1206,18 +1206,21 @@ def TT_ExperimentalTensormapFenceproxyAcquireOp: TT_Op<
 }
 
 def TT_ProtonRecordOp : TT_Op<"proton_record", [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
-  let summary = "Record an event metric from a hardware performance counter";
+  let summary = "Record an event given a proton metric type";
 
   let description = [{
-    Record an event metric (e.g., cycle) from a hardware performance counter.
+    Record an event from a special register or a hardware performance counter.
+    Currently only cycle counter is supported.
   }];
   let arguments = (
     ins BoolAttr: $isStart,
     I32Attr: $regionId,
-    DefaultValuedAttr<TT_ProtonMetricAttr, "triton::ProtonMetric::CYCLE">:$metric
+    DefaultValuedAttr<TT_ProtonMetricAttr, "triton::ProtonMetric::CYCLE">:$metric,
+    DefaultValuedAttr<TT_ProtonGranularityAttr, "triton::ProtonGranularity::WARPGROUP">:$granularity
   );
 
-  // TODO (fywkevin): add verify and asm format
+  let hasCustomAssemblyFormat = 1;
+  let hasVerifier = 1;
 }
 
 

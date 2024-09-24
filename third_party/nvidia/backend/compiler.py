@@ -102,6 +102,7 @@ class CUDAOptions:
     extern_libs: dict = None
     debug: bool = False
     backend_name: str = 'cuda'
+    proton_slots: int = 0
 
     def __post_init__(self):
         default_libdir = Path(__file__).parent / 'lib'
@@ -259,8 +260,8 @@ class CUDABackend(BaseBackend):
             mod.context.printOpOnDiagnostic(True)
         nvidia.passes.ttgpuir.add_decompose_unsupported_conversions(pm)
         passes.ttgpuir.add_combine_tensor_select_and_if(pm)
-        # TODO(fywkevin): add an option to check for proton
-        passes.ttgpuir.add_proton_lowering(pm)
+        if (options.proton_slots > 0):
+            passes.ttgpuir.add_proton_lowering(pm)
         passes.convert.add_scf_to_cf(pm)
         passes.convert.add_index_to_llvmir(pm)
         passes.ttgpuir.add_allocate_shared_memory(pm)

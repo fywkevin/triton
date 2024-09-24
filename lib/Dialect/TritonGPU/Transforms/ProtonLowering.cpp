@@ -33,7 +33,8 @@ public:
                                 PatternRewriter &rewriter) const override {
     MLIRContext *ctx = op.getContext();
     rewriter.replaceOpWithNewOp<LocalRecordOp>(
-        op, buffer, index, op.getIsStart(), op.getRegionId(), op.getMetric());
+        op, buffer, index, op.getIsStart(), op.getRegionId(), op.getMetric(),
+        op.getGranularity());
     return success();
   }
 
@@ -51,7 +52,8 @@ public:
     ModuleOp m = getOperation();
     MLIRContext *context = m.getContext();
 
-    // TODO (fywkevin) : better way to report failure.
+    // TODO (fywkevin) : better way to report failure. Move this to the
+    // verifier.
     FuncOp func;
     for (auto op : m.getOps<triton::FuncOp>()) {
       if (!func)
@@ -69,16 +71,17 @@ public:
 
     Location loc = func.getLoc();
 
+    // TODO (fywkevin): Remove this op when metric/granularity attr is invalid.
+
     //===--------------------------------------------------------------------===//
     // Allocate shared memory resources.
     //===--------------------------------------------------------------------===//
 
     OpBuilder builder(context);
     builder.setInsertionPointToStart(&func.getBody().front());
+
     const int wordsPerEntry = 2;
     const int warpsPerGroup = 4;
-
-    // TODO (fywkevin) : Add a check for <start,end> pair.
 
     // Alloc the shared memory for buffer (uninitialized).
     Attribute sharedMemorySpace =
