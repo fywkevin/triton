@@ -1047,13 +1047,26 @@ void ProtonRecordOp::getEffects(
 LogicalResult ProtonRecordOp::verify() {
   // We only support the warpgroup granularity for now.
   if (getGranularity() == ProtonGranularity::WARP)
-    return failure();
+    return emitError("Proton warp granularity is not supported");
 
-  // TODO (fywkevin) : Add the following checks
-  //  - a check for <start,end> pair
-  //  - a check for the last function argument is tt.ptr<i32>
-  //  - a check for the proton.slots attribute in module op
-  return success();
+  MLIRContext *ctx = getContext();
+  triton::FuncOp func = getOperation()->getParentOfType<triton::FuncOp>();
+
+  // Make sure the function is inlined.
+  if (func->hasAttr("noinline")) {
+    bool noinline = cast<BoolAttr>(func->getAttr("noinline")).getValue();
+    if (noinline)
+      return emitError("Intra kernel profiling only supports inlined kernels");
+  }
+
+  // Make sure the last argument of the function is a pointer of type i32.
+  BlockArgument arg = func.getArgument(func.getNumArguments() - 1);
+  if (auto ptrType = dyn_cast<triton::PointerType>(arg.getType())) {
+    if (ptrType.getPointeeType() == IntegerType::get(ctx, 32)) {
+      return success();
+    }
+  }
+  return emitError("The last argument of the function must be !tt.ptr<i32>");
 }
 
 ParseResult ProtonRecordOp::parse(OpAsmParser &parser, OperationState &result) {
@@ -1110,9 +1123,6 @@ ParseResult ProtonRecordOp::parse(OpAsmParser &parser, OperationState &result) {
     else if (granularity == "warp")
       granularityAttr =
           ProtonGranularityAttr::get(ctx, ProtonGranularity::WARP);
-    else if (granularity == "invalid")
-      granularityAttr =
-          ProtonGranularityAttr::get(ctx, ProtonGranularity::INVALID);
     else
       return failure();
     result.addAttribute("granularity", granularityAttr);
@@ -1140,10 +1150,8 @@ void ProtonRecordOp::print(OpAsmPrinter &printer) {
 
   if (getGranularity() == ProtonGranularity::WARP) {
     printer << "\"warp\"";
-  } else if (getGranularity() == ProtonGranularity::WARPGROUP) {
-    printer << "\"warpgroup\"";
   } else {
-    printer << "\"invalid\"";
+    printer << "\"warpgroup\"";
   }
 
   printer << ">";

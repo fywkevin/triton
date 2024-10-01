@@ -43,6 +43,10 @@ static Type getI1SameShapeFromTensorOrTensorPtr(Type type) {
 
 namespace gpu {
 
+const int getWarpGroupSize() { return 4; }
+
+const int getWordsPerProtonEntry() { return 2; }
+
 // TODO: Inheritance of layout attributes
 // so that all distributed layouts implement
 // these utilities
@@ -2975,6 +2979,27 @@ void LocalRecordOp::getEffects(
                        SideEffects::DefaultResource::get());
   effects.emplace_back(MemoryEffects::Read::get(),
                        SideEffects::DefaultResource::get());
+}
+
+LogicalResult LocalRecordOp::verify() {
+  auto m = getOperation()->getParentOfType<mlir::ModuleOp>();
+  if (!m->hasAttr("triton_gpu.proton-slots"))
+    return emitError("Intra-kernel profiling not enabled");
+
+  int slots = cast<IntegerAttr>(m->getAttr("triton_gpu.proton-slots")).getInt();
+
+  const int warpsPerGroup = getWarpGroupSize();
+  int numWarpgroups = TritonGPUDialect::getNumWarps(m) / warpsPerGroup;
+  if (slots < numWarpgroups)
+    return emitError(
+        "Proton slots must be greater than the number of warpgroups per CTA");
+
+  // Ensure that slots is a power of 2. Otherwise, the profiling circular buffer
+  // index management incurs too much overhead.
+  if ((slots & (slots - 1)) != 0)
+    return emitError("Proton slots must be power of 2");
+
+  return success();
 }
 
 // ProtonFinalizeOp

@@ -86,10 +86,10 @@ def _get_num_warps_from_ir_str(src: str):
 
 
 def _get_proton_slots_from_ir_str(src: str):
-    proton_slots_pattern = r'"proton.slots"\s?=\s?(\d+)\s?:'
+    proton_slots_pattern = r'"triton_gpu.proton-slots"\s?=\s?(\d+)\s?:'
     matches = re.findall(proton_slots_pattern, src)
     matches_len = len(matches)
-    assert matches_len <= 1, "Expected exactly zero or one match for proton.slots"
+    assert matches_len <= 1, "Expected exactly zero or one match for proton-slots"
     num_slot = int(matches[0]) if matches_len == 1 else None
     return num_slot
 

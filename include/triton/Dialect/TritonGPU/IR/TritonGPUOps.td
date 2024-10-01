@@ -257,10 +257,10 @@ def TTG_LocalStoreOp : TTG_Op<"local_store", [DeclareOpInterfaceMethods<MemoryEf
 }
 
 def TTG_LocalRecordOp : TTG_Op<"local_record", [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
-  let summary = "Record an event from a special register or a hardware performance counter";
+  let summary = "Record a hardware event";
 
   let description = [{
-    Record an event (e.g., cycle) from a special register or a hardware performance counter,
+    The intra kernel profiler records an event from a special register or a hardware performance counter,
     and save it in the shared memory. The bookkeeping is automatically maintained.
   }];
   let arguments = (
@@ -271,14 +271,14 @@ def TTG_LocalRecordOp : TTG_Op<"local_record", [DeclareOpInterfaceMethods<Memory
     DefaultValuedAttr<TT_ProtonMetricAttr, "triton::ProtonMetric::CYCLE">:$metric,
     DefaultValuedAttr<TT_ProtonGranularityAttr, "triton::ProtonGranularity::WARPGROUP">:$granularity
   );
+  let hasVerifier = 1;
 }
 
 def TTG_ProtonFinalizeOp : TTG_Op<"proton_finalize", [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
-  let summary = "Finalize the proton profiler";
+  let summary = "Finalize the intra kernel profiler";
 
   let description = [{
-    Finalize the proton profiler, including dumping the metadata and measurements to the global memory for
-    each SM.
+    Finalize the intra kernel profiler, including dumping the metadata and measurements to the global memory.
   }];
   let arguments = (
     ins TT_MemDescType:$data,
@@ -288,10 +288,10 @@ def TTG_ProtonFinalizeOp : TTG_Op<"proton_finalize", [DeclareOpInterfaceMethods<
 }
 
 def TTG_ProtonInitOp : TTG_Op<"proton_init", [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
-    let summary = "Initialize proton profiler resources.";
+    let summary = "Initialize the intra kernel profiler";
 
     let description = [{
-        Stack allocation and initialization for proton profiler.
+        Stack allocation and initialization for the intra kernel profiler.
         `indexPtr` stores the number of entires proton measured, initialized as 0.
     }];
     let arguments = (ins);

@@ -1,15 +1,14 @@
 import torch
 import triton
 import triton.language as tl
+import numpy as np
+import triton.profiler as proton
 
-from proton_chrome_trace import *
-
-file_name = "add_wg2.ttgir"
-exp_kernel = triton.compile(file_name)
-
+enable_profiling = True
+file_name = "add_kernel.ttgir"
 BLOCK = 4096
 SLOT = 32
-WG = 2
+WG = 1
 
 
 @triton.jit(noinline=True)
@@ -18,6 +17,7 @@ def add_kernel(x_ptr,  # *Pointer* to first input vector.
                output_ptr,  # *Pointer* to output vector.
                n_elements,  # Size of the vector.
                BLOCK_SIZE: tl.constexpr,  # Number of elements each program should process.
+               profile_mem,  # *Pointer* to profile memory.
                # NOTE: `constexpr` so it can be used as a shape value.
                ):
     # There are multiple 'programs' processing different data. We identify which program
@@ -46,18 +46,24 @@ def add(x: torch.Tensor, y: torch.Tensor):
     assert x.is_cuda and y.is_cuda and output.is_cuda
     n_elements = output.numel()
     grid = (int(n_elements / BLOCK), 1, 1)
-    '''
-    add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=BLOCK, num_warps=8)
-    '''
-    pconfig = ProfileConfig(slots=SLOT, header=3, wg_num=WG, word_per_slot=2)
-    scratch = get_scratch_size(pconfig)
-    profile_mem = torch.empty((np.prod(grid) * scratch), device="cuda", dtype=torch.uint32)
-    exp_kernel[grid](x, y, output, n_elements, profile_mem)
-    torch.set_printoptions(profile="full")
-    print(profile_mem[0:512])
-    torch.set_printoptions(profile="default")
-    dump_chrome_trace(np.prod(grid), pconfig, profile_mem, "chrome_trace.json")
 
+    # We preallocate the profile memory.
+    pconfig = proton.IntraKernelConfig(slots=SLOT, header=3, wg_num=WG, word_per_slot=2)
+    scratch = proton.intra_kernel_smem(pconfig)
+    profile_mem = torch.empty((np.prod(grid) * scratch), device="cuda", dtype=torch.uint32)
+
+    if not enable_profiling:
+        add_kernel[grid](x, y, output, n_elements, BLOCK, profile_mem, num_warps=4, proton_slots=SLOT)
+        for sig in add_kernel.cache[0]:
+            kernel = add_kernel.cache[0][sig]
+            # This gives the kernel's TTGIR source code so we can add proton_record to it.
+            print(kernel.asm['ttgir'])
+    else:
+        exp_kernel = triton.compile(file_name)
+        # Note that the BLOCK argument is constant-folded.
+        # See visit_FunctionDef in python/triton/compiler/code_generator.py
+        exp_kernel[grid](x, y, output, n_elements, profile_mem)
+        proton.dump_chrome_trace(np.prod(grid), pconfig, profile_mem, "chrome_trace.json")
     return output
 
 

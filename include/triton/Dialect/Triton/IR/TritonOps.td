@@ -1206,10 +1206,10 @@ def TT_ExperimentalTensormapFenceproxyAcquireOp: TT_Op<
 }
 
 def TT_ProtonRecordOp : TT_Op<"proton_record", [DeclareOpInterfaceMethods<MemoryEffectsOpInterface>]> {
-  let summary = "Record an event given a proton metric type";
+  let summary = "Record a hardware event";
 
   let description = [{
-    Record an event from a special register or a hardware performance counter.
+    The intra kernel profiler records an event from a special register or a hardware performance counter.
     Currently only cycle counter is supported.
   }];
   let arguments = (

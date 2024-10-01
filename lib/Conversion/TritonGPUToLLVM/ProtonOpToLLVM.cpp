@@ -25,7 +25,10 @@ struct LocalRecordOpConversion
                   ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
     auto mod = op.getOperation()->getParentOfType<ModuleOp>();
-    const int slots = cast<IntegerAttr>(mod->getAttr("proton.slots")).getInt();
+    const int warpsPerGroup = triton::gpu::getWarpGroupSize();
+    const int wordsPerEntry = triton::gpu::getWordsPerProtonEntry();
+    const int slots =
+        cast<IntegerAttr>(mod->getAttr("triton_gpu.proton-slots")).getInt();
     const int numWarpgroup =
         triton::gpu::TritonGPUDialect::getNumWarps(mod) / warpsPerGroup;
 
@@ -43,17 +46,18 @@ struct LocalRecordOpConversion
     Value warpgroupId = udiv(threadId, warpgroupSize);
     Value isWarpgroup = icmp_eq(urem(threadId, warpgroupSize), i32_val(0));
 
-    // Load the index from smem
+    // Load the index from smem.
     Value curIdx = load(i32_ty, indexPtr);
     Value newIdx = add(curIdx, i32_val(wordsPerEntry));
     store(newIdx, indexPtr);
 
+    // Compute the offset in smem.
     int numWgSlot = slots / numWarpgroup;
     Value wgSlotOffset = mul(warpgroupId, i32_val(wordsPerEntry * numWgSlot));
     Value smemTagOffset =
         add(wgSlotOffset, urem(curIdx, i32_val(wordsPerEntry * numWgSlot)));
 
-    // Record the entry
+    // Record the entry and vectorized store to smem.
     Value vecPtr = gep(smemPtrTy, i32_ty, smemDataBasePtr, smemTagOffset);
     Value tag = op.getIsStart() ? i32_val(op.getRegionId())
                                 : i32_val(1 << 31 | op.getRegionId());
@@ -69,8 +73,6 @@ struct LocalRecordOpConversion
 
 private:
   const TargetInfoBase &targetInfo;
-  const int wordsPerEntry = 2;
-  const int warpsPerGroup = 4;
 };
 
 struct ProtonFinalizeOpConversion
@@ -91,18 +93,11 @@ struct ProtonFinalizeOpConversion
 
     auto loc = op.getLoc();
     auto mod = op.getOperation()->getParentOfType<ModuleOp>();
-    const int numWarpgroup =
-        triton::gpu::TritonGPUDialect::getNumWarps(mod) / warpsPerGroup;
-
-    // TODO (fywkevin) : Does Triton always have the block size (xxx, 1, 1)?
+    const int warpsPerGroup = triton::gpu::getWarpGroupSize();
+    const int wordsPerEntry = triton::gpu::getWordsPerProtonEntry();
     Value threadId = getThreadId(rewriter, loc);
     Value isFirstThread = icmp_eq(threadId, i32_val(0));
-    Value warpgroupSize = i32_val(
-        warpsPerGroup * triton::gpu::TritonGPUDialect::getThreadsPerWarp(mod));
-    Value warpgroupId = udiv(threadId, warpgroupSize);
-    Value isWarpgroup = icmp_eq(urem(threadId, warpgroupSize), i32_val(0));
 
-    // Only warpgroup leader should do these finalize work.
     Block *prevBlock = op->getBlock();
     // Add the 'if' block.
     Block *ifBlock = rewriter.splitBlock(prevBlock, op->getIterator());
@@ -125,9 +120,9 @@ struct ProtonFinalizeOpConversion
     };
 
     int offset = 0;
-    const int slots = cast<IntegerAttr>(mod->getAttr("proton.slots")).getInt();
-    // scratch: block id (1), sm id (1), index (1), data
-    // (proton.slots * wordsPerEntry)
+    const int slots =
+        cast<IntegerAttr>(mod->getAttr("triton_gpu.proton-slots")).getInt();
+    // scratch: block id (1), sm id (1), index (1), data (slots * wordsPerEntry)
     const int scratchWordSize = 3 + slots * wordsPerEntry;
     Value pidX = targetInfo.programId(rewriter, loc, mod, 0);
     Value pidY = targetInfo.programId(rewriter, loc, mod, 1);
@@ -170,7 +165,6 @@ struct ProtonFinalizeOpConversion
     Value initIdx = rewriter.create<LLVM::ConstantOp>(loc, i32_ty, 0);
     Value wbBaseOffset = add(programOffset, i32_val(offset));
 
-    // TODO (fywkevin): make `loc` precise.
     Block *writeBackBlock = rewriter.createBlock(
         op->getParentRegion(), std::next(Region::iterator(ifBlock)), {i32_ty},
         {loc});
@@ -196,8 +190,6 @@ struct ProtonFinalizeOpConversion
 
 private:
   const TargetInfoBase &targetInfo;
-  const int wordsPerEntry = 2;
-  const int warpsPerGroup = 4;
 };
 
 struct ProtonInitOpConversion
@@ -214,13 +206,6 @@ struct ProtonInitOpConversion
                   ConversionPatternRewriter &rewriter) const override {
     auto loc = op.getLoc();
     auto mod = op.getOperation()->getParentOfType<ModuleOp>();
-
-    Value threadId = getThreadId(rewriter, loc);
-    Value warpgroupSize = i32_val(
-        warpsPerGroup * triton::gpu::TritonGPUDialect::getThreadsPerWarp(mod));
-    Value warpgroupId = udiv(threadId, warpgroupSize);
-    Value isWarpgroup = icmp_eq(urem(threadId, warpgroupSize), i32_val(0));
-
     auto ptrTy = ptr_ty(rewriter.getContext(), 1);
     auto indexPtr = rewriter.create<LLVM::AllocaOp>(
         loc, ptrTy, i32_ty, i32_val(1), /*alignment=*/0);
@@ -231,7 +216,6 @@ struct ProtonInitOpConversion
 
 private:
   const TargetInfoBase &targetInfo;
-  const int warpsPerGroup = 4;
 };
 
 } // namespace

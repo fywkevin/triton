@@ -548,7 +548,8 @@ Value TargetInfo::clock(RewriterBase &rewriter, Location loc,
                         bool isClock64) const {
   assert(!isClock64 && "clock64 is not supported yet.");
 
-  // TODO (fywkevin): modify the getSRegValue with side effect argument.
+  // TODO (fywkevin): refactor the getSRegValue for side effect to avoid
+  // redundant code.
   PTXBuilder builder;
   auto &mov = builder.create("mov")->o("u32");
   auto *destOpr = builder.newOperand("=r");

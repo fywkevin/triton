@@ -134,7 +134,6 @@ def TT_ProtonGranularityAttr : I32EnumAttr<
     [
         I32EnumAttrCase<"WARPGROUP", 0, "warpgroup">,
         I32EnumAttrCase<"WARP", 1, "warp">,
-        I32EnumAttrCase<"INVALID", 2, "invalid">,
     ]> {
     let cppNamespace = "::mlir::triton";
 }

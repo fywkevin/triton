@@ -206,7 +206,7 @@ class CUDABackend(BaseBackend):
         # TTIR -> TTGIR
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
-        passes.ttir.add_convert_to_ttgpuir(pm, f"cuda:{capability}", opt.num_warps, 32, opt.num_ctas)
+        passes.ttir.add_convert_to_ttgpuir(pm, f"cuda:{capability}", opt.num_warps, 32, opt.num_ctas, opt.proton_slots)
         # optimize TTGIR
         passes.ttgpuir.add_coalesce(pm)
         if capability // 10 >= 8:
@@ -245,11 +245,6 @@ class CUDABackend(BaseBackend):
         if num_warp_groups is not None:
             metadata["num_warps"] *= num_warp_groups
         mod = src
-        # fywkevin: hack here to experiment
-        with open("/home/fywkevin/local/exp/profiler/tmp.ttgir", 'w') as f:
-            f.write(mod.__str__())
-        print("---- successfully wrote to tmp.ttgir ----")
-        # fywkevin: hack end
         # TritonGPU -> LLVM-IR (MLIR)
         pm = ir.pass_manager(mod.context)
         pm.enable_debug()
@@ -274,11 +269,6 @@ class CUDABackend(BaseBackend):
         if os.environ.get("TRITON_DISABLE_LINE_INFO", "0") == "0":
             passes.llvmir.add_di_scope(pm)
         pm.run(mod)
-        # fywkevin: hack here to experiment
-        with open("/home/fywkevin/local/exp/profiler/tmp-llvm-ir.mlir", 'w') as f:
-            f.write(mod.__str__())
-        print("---- successfully wrote to tmp-llvm-ir.mlir ----")
-        # fywkevin: hack end
         # LLVM-IR (MLIR) -> LLVM-IR (LLVM)
         llvm.init_targets()
         context = llvm.context()

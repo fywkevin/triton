@@ -182,9 +182,9 @@ def TritonGPUOptimizeAccumulatorInit: Pass<"tritongpu-optimize-accumulator-init"
 def TritonGPUProtonLowering: Pass<"tritongpu-proton-lowering", "mlir::ModuleOp"> {
   let summary = "Lower the Triton's ProtonRecordOp with scaffolding code (e.g., resource allocation and post processing).";
 
-  let description = "Allocate shared memory for local profiling buffers and convert the Triton's ProtonRecordOp into "
-                "TritonGPU's LocalRecordOp with resource binded. Before exiting the module op, codes for writing back "
-                "the local profiling buffers (with metadata) to GPU's global memory are also generated.";
+  let description = "Allocate memory for local profiling buffers and convert the Triton's ProtonRecordOp into "
+                "TritonGPU's LocalRecordOp with resource binded. Before exiting the local profiling buffers "
+                "(with metadata) are copied back to GPU's global memory.";
 
   let dependentDialects = ["mlir::triton::gpu::TritonGPUDialect",
                            "mlir::triton::TritonDialect"];

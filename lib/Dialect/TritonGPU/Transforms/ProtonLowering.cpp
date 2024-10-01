@@ -1,22 +1,14 @@
-#include "mlir/Dialect/Arith/IR/Arith.h"
 #include "mlir/IR/BuiltinAttributes.h"
-#include "mlir/IR/Matchers.h"
 #include "mlir/IR/PatternMatch.h"
 #include "mlir/IR/Verifier.h"
-#include "mlir/Interfaces/InferTypeOpInterface.h"
-#include "mlir/Pass/Pass.h"
 #include "mlir/Pass/PassManager.h"
 #include "mlir/Support/LLVM.h"
 #include "mlir/Support/LogicalResult.h"
 #include "mlir/Transforms/GreedyPatternRewriteDriver.h"
 #include "mlir/Transforms/Passes.h"
-#include "mlir/Transforms/RegionUtils.h"
-#include "triton/Analysis/Utility.h"
 #include "triton/Dialect/Triton/IR/Dialect.h"
 #include "triton/Dialect/TritonGPU/IR/Dialect.h"
-#include "triton/Dialect/TritonGPU/Transforms/Passes.h"
 
-// TODO (fywkevin) : clean up the headers
 namespace mlir {
 namespace triton {
 namespace gpu {
@@ -52,26 +44,19 @@ public:
     ModuleOp m = getOperation();
     MLIRContext *context = m.getContext();
 
-    // TODO (fywkevin) : better way to report failure. Move this to the
-    // verifier.
-    FuncOp func;
-    for (auto op : m.getOps<triton::FuncOp>()) {
-      if (!func)
-        func = op;
-      else
-        llvm::report_fatal_error("only expect one function in the module");
-    }
-
-    bool noinline = cast<BoolAttr>(func->getAttr("noinline")).getValue();
-    assert(!noinline &&
-           "only support inlined triton kernels for now (noinline = false)");
-
-    assert(m->hasAttr("proton.slots") && "intra-kernel profiling not enabled");
-    auto slots = cast<IntegerAttr>(m->getAttr("proton.slots")).getInt();
+    assert(llvm::range_size(m.getOps<triton::FuncOp>()) == 1 &&
+           "expect only one function in the module");
+    FuncOp func = *m.getOps<triton::FuncOp>().begin();
 
     Location loc = func.getLoc();
 
-    // TODO (fywkevin): Remove this op when metric/granularity attr is invalid.
+    // TODO (fywkevin): Remove the proton_record op when its metric attr is
+    // "invalid".
+    bool hasProtonRecordOp = false;
+    func.walk([&](triton::ProtonRecordOp op) { hasProtonRecordOp = true; });
+    if (!hasProtonRecordOp) {
+      return;
+    }
 
     //===--------------------------------------------------------------------===//
     // Allocate shared memory resources.
@@ -80,8 +65,9 @@ public:
     OpBuilder builder(context);
     builder.setInsertionPointToStart(&func.getBody().front());
 
-    const int wordsPerEntry = 2;
-    const int warpsPerGroup = 4;
+    const int wordsPerEntry = triton::gpu::getWordsPerProtonEntry();
+    int slots =
+        cast<IntegerAttr>(m->getAttr("triton_gpu.proton-slots")).getInt();
 
     // Alloc the shared memory for buffer (uninitialized).
     Attribute sharedMemorySpace =
@@ -95,11 +81,6 @@ public:
         MemDescType::get({wordsPerEntry * slots}, builder.getI32Type(),
                          encoding, sharedMemorySpace, /*mutable_memory=*/true);
     Value buffer = builder.create<triton::gpu::LocalAllocOp>(loc, bufferType);
-
-    // Alloc the shared memory for index (uninitialized).
-    int numWarpgroups = TritonGPUDialect::getNumWarps(m) / warpsPerGroup;
-    assert(slots >= numWarpgroups &&
-           "proton.slots must be greater than numWarpgroups");
 
     //===--------------------------------------------------------------------===//
     // Insert and lower Proton operators.
