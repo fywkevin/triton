@@ -110,16 +110,17 @@ def start(
 
     _check_env(backend)
 
-<<<<<<< HEAD
     _check_mode(backend, mode)
-=======
+
+    if mode is None:
+        mode = ""
+
     backend_path = _get_backend_default_path(backend)
->>>>>>> main
 
     set_profiling_on()
     if hook and hook == "triton":
         register_triton_hook()
-    return libproton.start(name, context, data, backend, backend_path)
+    return libproton.start(name, context, data, backend, backend_path, mode)
 
 
 def activate(session: Optional[int] = None) -> None:
