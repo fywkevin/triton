@@ -45,9 +45,9 @@ SmallVector<unsigned, 3> mmaVersionToInstrShape(int version,
     SmallVector<unsigned> validN;
 
     // MMAv3 with larger instruction shape is preferred.
-    if (eltType.isFloat8E5M2() || eltType.isFloat8E4M3FN() ||
-        eltType.isFloat8E4M3FNUZ() || eltType.isF16() || eltType.isBF16() ||
-        eltType.isF32()) {
+    if (llvm::isa<Float8E5M2Type, Float8E4M3FNType, Float8E4M3FNUZType>(
+            eltType) ||
+        eltType.isF16() || eltType.isBF16() || eltType.isF32()) {
       validN.assign({256, 248, 240, 232, 224, 216, 208, 200, 192, 184, 176,
                      168, 160, 152, 144, 136, 128, 120, 112, 104, 96,  88,
                      80,  72,  64,  56,  48,  40,  32,  24,  16,  8});
@@ -89,11 +89,9 @@ bool isLoadFromTensorPtr(triton::LoadOp op) {
   return mlir::triton::isTensorPointerType(op.getPtr().getType());
 }
 
-SmallVector<unsigned, 4>
-getOrderFromContiguity(const SmallVector<int64_t> &arr) {
+SmallVector<unsigned, 4> argSort(const SmallVector<int64_t> &arr) {
   SmallVector<unsigned, 4> ret(arr.size());
   std::iota(ret.begin(), ret.end(), 0);
-  std::reverse(ret.begin(), ret.end());
   std::stable_sort(ret.begin(), ret.end(),
                    [&](unsigned x, unsigned y) { return arr[x] > arr[y]; });
   return ret;
@@ -805,11 +803,10 @@ LogicalResult getConvertBackwardSlice(
   auto updateLayout = [&](Value value, Attribute encoding) {
     assert((isa<RankedTensorType>(value.getType())));
     slice.insert(value);
-    if (layout.find(value) != layout.end()) {
-      if (layout[value] != encoding)
-        return failure();
-    }
-    layout[value] = encoding;
+    Attribute &existing = layout[value];
+    if (existing && existing != encoding)
+      return failure();
+    existing = encoding;
     return success();
   };
 
@@ -835,6 +832,8 @@ LogicalResult getConvertBackwardSlice(
     }
 
     if (auto ifOp = currentValue.getDefiningOp<scf::IfOp>()) {
+      if (stopPropagation && stopPropagation(ifOp))
+        continue;
       unsigned argIdx = mlir::cast<OpResult>(currentValue).getResultNumber();
 
       OpOperand &thenValue = ifOp.thenYield()->getOpOperand(argIdx);
@@ -968,7 +967,7 @@ int getNVIDIAComputeCapability(Operation *module) {
          "Expected a target attribute on the module operation");
 
   StringAttr targetAttr =
-      cast<StringAttr>(module->getAttr(triton::AttrTargetName));
+      module->getAttrOfType<StringAttr>(triton::AttrTargetName);
 
   StringRef ref = targetAttr.strref();
   assert(ref.starts_with("cuda:") &&
@@ -981,6 +980,20 @@ int getNVIDIAComputeCapability(Operation *module) {
          "invalid compute capability string in target attribute");
 
   return computeCapability;
+}
+
+StringRef getAMDArch(Operation *module) {
+  assert(module->hasAttr(triton::AttrTargetName) &&
+         "Expected a target attribute on the module operation");
+
+  StringAttr targetAttr =
+      module->getAttrOfType<StringAttr>(triton::AttrTargetName);
+
+  StringRef ref = targetAttr.strref();
+  assert(ref.starts_with("hip:") &&
+         "expected target attribute to be prefixed with \"hip:\"");
+
+  return ref.drop_front(4); // drop the "hip:"
 }
 
 // If all the transitive uses of the given value have are used by a convert to
