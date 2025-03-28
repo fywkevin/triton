@@ -14,6 +14,9 @@ void populateProtonGPUOpPatterns(LLVMTypeConverter &typeConverter,
                                  RewritePatternSet &patterns,
                                  const TargetInfoBase &targetInfo,
                                  PatternBenefit benefit);
+
+void populateTypeConversions(LLVMTypeConverter &typeConverter,
+                             const TargetInfoBase &targetInfo);
 } // namespace proton::gpu
 } // namespace mlir::triton
 
