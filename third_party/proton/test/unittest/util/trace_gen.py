@@ -20,23 +20,19 @@ def write_tensor_to_file(num_blocks, metadata, tensor, filename):
     with open(filename, 'wb') as f:
         f.write(struct.pack('III', num_blocks, metadata.num_warps, metadata.profile_scratch_size))
 
-        data_arr = ctypes.cast(
-            data_ptr, 
-            ctypes.POINTER(ctypes.c_ubyte * total_bytes)
-        )
+        data_arr = ctypes.cast(data_ptr, ctypes.POINTER(ctypes.c_ubyte * total_bytes))
 
         f.write(bytes(data_arr.contents))
 
 
 @triton.jit
-def add_kernel(
-    x_ptr,  # *Pointer* to first input vector.
-    y_ptr,  # *Pointer* to second input vector.
-    output_ptr,  # *Pointer* to output vector.
-    n_elements,  # Size of the vector.
-    BLOCK_SIZE: tl.constexpr,  # Number of elements each program should process.
-    # NOTE: `constexpr` so it can be used as a shape value.
-):
+def add_kernel(x_ptr,  # *Pointer* to first input vector.
+               y_ptr,  # *Pointer* to second input vector.
+               output_ptr,  # *Pointer* to output vector.
+               n_elements,  # Size of the vector.
+               BLOCK_SIZE: tl.constexpr,  # Number of elements each program should process.
+               # NOTE: `constexpr` so it can be used as a shape value.
+               ):
     pid = tl.program_id(axis=0)
     pl.enter_scope("r0")
     block_start = pid * BLOCK_SIZE
@@ -61,7 +57,7 @@ def add(args):
     output = torch.empty_like(x)
     assert x.device == DEVICE and y.device == DEVICE and output.device == DEVICE
     n_elements = output.numel()
-    grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+    grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]), )
     proton.start("", backend="instrumentation")
     InstrumentationHook.enable_host_buffer = True
     pgm = add_kernel[grid](x, y, output, n_elements, BLOCK_SIZE=1024)
@@ -70,8 +66,7 @@ def add(args):
 
 
 @triton.jit
-def loop_kernel(
-):
+def loop_kernel():
     for k in range(0, 20):
         pl.enter_scope("r0")
         pl.exit_scope("r0")
@@ -85,12 +80,13 @@ def loop(args):
     write_tensor_to_file(1, pgm.metadata, InstrumentationHook.host_buffer, args.trace_file)
     proton.finalize()
 
+
 def main():
     parser = argparse.ArgumentParser(description='Proton intra kernel profiler trace generator')
     parser.add_argument('trace_file', type=str, help='Trace file path')
     parser.add_argument('--kernel', '-k', type=str, help='Kernel name')
     args = parser.parse_args()
-    
+
     if args.kernel == "add":
         add(args)
     if args.kernel == "loop":
