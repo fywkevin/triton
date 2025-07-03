@@ -11,6 +11,7 @@ from triton.tools.tensor_descriptor import TensorDescriptor
 
 from typing import NamedTuple
 
+
 def is_cuda():
     return triton.runtime.driver.active.get_current_target().backend == "cuda"
 
@@ -464,7 +465,7 @@ def test_sched_barrier(tmp_path: pathlib.Path):
 
 def test_warp_spec(tmp_path: pathlib.Path):
 
-    if HAS_WARP_SPECIALIZE == False:
+    if not HAS_WARP_SPECIALIZE:
         pytest.skip("target backend does not support warp specialization")
 
     def matmul_get_configs(pre_hook=None):
@@ -476,7 +477,7 @@ def test_warp_spec(tmp_path: pathlib.Path):
             for s in ([2]) \
             for w in [8] \
         ]
-    
+
     def matmul_tma_set_block_size_hook(nargs):
         EPILOGUE_SUBTILE = nargs.get("EPILOGUE_SUBTILE", False)
         BLOCK_M = nargs["BLOCK_SIZE_M"]
@@ -495,14 +496,14 @@ def test_warp_spec(tmp_path: pathlib.Path):
     )
     @triton.jit
     def matmul_kernel_tma(a_desc, b_desc, c_desc,  #
-                        M, N, K,  #
-                        BLOCK_SIZE_M: tl.constexpr,  #
-                        BLOCK_SIZE_N: tl.constexpr,  #
-                        BLOCK_SIZE_K: tl.constexpr,  #
-                        GROUP_SIZE_M: tl.constexpr,  #
-                        FP8_OUTPUT: tl.constexpr,  #
-                        WARP_SPECIALIZE: tl.constexpr,  #
-                        ):
+                          M, N, K,  #
+                          BLOCK_SIZE_M: tl.constexpr,  #
+                          BLOCK_SIZE_N: tl.constexpr,  #
+                          BLOCK_SIZE_K: tl.constexpr,  #
+                          GROUP_SIZE_M: tl.constexpr,  #
+                          FP8_OUTPUT: tl.constexpr,  #
+                          WARP_SPECIALIZE: tl.constexpr,  #
+                          ):
         dtype = tl.float8e4nv if FP8_OUTPUT else tl.float16
         pl.enter_scope("kernel")
         pid = tl.program_id(axis=0)
@@ -567,8 +568,7 @@ def test_warp_spec(tmp_path: pathlib.Path):
         )
         return c
 
-
-    mode = proton.mode.Default(metric_type="cycle",  optimizations="clock32")
+    mode = proton.mode.Default(metric_type="cycle", optimizations="clock32")
     temp_file = tmp_path / "test_warpspec.hatchet"
     proton.start(str(temp_file.with_suffix("")), backend="instrumentation", mode=mode)
     torch.manual_seed(0)
